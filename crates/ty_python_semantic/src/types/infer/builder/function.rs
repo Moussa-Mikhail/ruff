@@ -1,3 +1,4 @@
+use crate::types::ApplyTypeMappingVisitor;
 use crate::{
     Db, DisplaySettings, FxIndexMap, ProgramEnvironment,
     reachability::is_end_of_scope_reachable,
@@ -2340,7 +2341,7 @@ fn is_instance_truthiness<'db>(
 
     match ty {
         Type::Recursive(recursive) => recursive
-            .unfold(db, env)
+            .unfold(db, &ApplyTypeMappingVisitor::new(env))
             .map(|unfolded| is_instance_truthiness(db, env, unfolded, class))
             .unwrap_or(Truthiness::Ambiguous),
         Type::RecursiveVar(_) => {
