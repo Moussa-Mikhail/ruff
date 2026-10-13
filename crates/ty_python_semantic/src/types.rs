@@ -169,10 +169,9 @@ mod protocol_class;
 mod recursive;
 pub(crate) use recursive::RecursiveMapping;
 pub(crate) use recursive::UnfoldResult;
-pub use recursive::{
-    RecursiveType, RecursiveVar, TypeQuery, TypeQueryContext, TypeTraversal, TypeWalk,
-};
+pub use recursive::{RecursiveType, RecursiveVar, TypeQuery, TypeQueryContext};
 use recursive::{TypeInspector, TypeVisitorState};
+pub(crate) use recursive::{TypeTraversal, TypeWalk};
 pub(crate) mod relation;
 mod relation_error;
 mod set_theoretic;

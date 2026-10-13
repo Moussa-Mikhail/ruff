@@ -248,7 +248,7 @@ where
 /// method. They never unfold recursive bodies or manage the active recursion stack themselves.
 /// `State` passes per-visit inputs, including mutable builders, without storing them in the traversal.
 /// Repeated occurrences are visited independently; use [`TypeQuery`] for reusable semantic results.
-pub trait TypeWalk<'db, State = ()>: Sized {
+pub(crate) trait TypeWalk<'db, State = ()>: Sized {
     type Output;
 
     fn visit(
@@ -307,7 +307,7 @@ struct TypeTraversalTag;
 /// therefore covers both unfolding and the operation's subsequent traversal of that body.
 /// This is a walk: callbacks can mutate builders or collect occurrences. Use [`TypeQueryContext`]
 /// for operations that compute a reusable result from a type and immutable input.
-pub struct TypeTraversal<'env, 'db, O> {
+pub(crate) struct TypeTraversal<'env, 'db, O> {
     operation: O,
     env: &'env ProgramEnvironment<'db>,
     recursion_context: Option<&'env TypeRecursionContext<'db>>,
@@ -327,7 +327,7 @@ impl<'env, 'db, O> TypeTraversal<'env, 'db, O> {
     }
 
     /// Run an operation with one borrowed traversal for its entire recursion.
-    pub fn with_root<R>(
+    pub(crate) fn with_root<R>(
         env: &'env ProgramEnvironment<'db>,
         operation: O,
         visit: impl FnOnce(&Self) -> R,
@@ -382,7 +382,7 @@ impl<'env, 'db, O> TypeTraversal<'env, 'db, O> {
         visit(&Self::from_mapping_visitor(visitor, operation))
     }
 
-    pub fn visit(&self, db: &'db dyn Db, ty: Type<'db>) -> O::Output
+    pub(crate) fn visit(&self, db: &'db dyn Db, ty: Type<'db>) -> O::Output
     where
         O: TypeWalk<'db>,
     {
@@ -461,7 +461,7 @@ fn needs_traversal_guard(ty: Type<'_>) -> bool {
 /// must return the same result for the same type and input under the same recursion guards.
 /// Parameters shared by all recursive calls, such as an attribute name, belong on `Self`.
 /// Parameters that change between calls, such as a descriptor's receiver, belong in `Input`.
-/// Use [`TypeWalk`] for callbacks or walks that mutate a collector or builder instead.
+/// Keep mutable collectors and builders in a separate walk.
 pub trait TypeQuery<'db, Input = ()>: Sized
 where
     Input: Clone + Eq + Hash,
@@ -557,7 +557,7 @@ where
         self.traversal.environment()
     }
 
-    pub(super) fn mapping_visitor(&self) -> &ApplyTypeMappingVisitor<'env, 'db> {
+    fn mapping_visitor(&self) -> &ApplyTypeMappingVisitor<'env, 'db> {
         self.traversal.mapping_visitor()
     }
 
