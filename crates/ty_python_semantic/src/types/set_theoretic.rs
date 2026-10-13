@@ -289,7 +289,7 @@ impl<'db> UnionType<'db> {
     }
 
     /// Returns `true` if any direct element of this union is a type alias.
-    pub(crate) fn has_aliases(self, db: &'db dyn Db) -> bool {
+    fn has_aliases(self, db: &'db dyn Db) -> bool {
         self.elements(db).iter().copied().any(Type::is_alias_like)
     }
 

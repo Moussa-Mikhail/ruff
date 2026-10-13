@@ -349,11 +349,11 @@ where
     }
 }
 
-/// A walk that observes type structure or borrows mutable state.
+/// A walk over outer type alternatives that can borrow mutable state.
 ///
 /// [`TypeTraversal`] expands aliases and recursive types, and normalizes outer unions, before
-/// calling [`Self::visit`]. Structural transformations use [`StructuralTypeTraversal`] to retain
-/// the original alternatives.
+/// calling [`Self::visit`]. Transformations that descend into type arguments use
+/// [`StructuralTypeTraversal`] to retain recursive alias edges and the original alternatives.
 /// A recursive reference whose body is still unavailable is passed through unchanged.
 /// Implementations select which other children to inspect by calling the traversal's `visit`
 /// method. They never unfold recursive bodies or manage the active recursion stack themselves.
