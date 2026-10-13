@@ -160,6 +160,40 @@ Defaults to `true`.
 
 ---
 
+### `return-type-inference`
+
+Controls return type inference for functions without explicit return annotations.
+
+- `"never"`: Do not infer return types from function bodies.
+- `"always"`: Infer return types for unannotated functions and methods.
+
+Explicit return annotations are preserved, and stub bodies are not used for inference.
+Defaults to `"never"`.
+
+Return type inference is not yet implemented; this setting currently has no effect.
+
+**Default value**: `"never"`
+
+**Type**: `"never" | "always"`
+
+**Example usage**:
+
+=== "pyproject.toml"
+
+    ```toml
+    [tool.ty.analysis]
+    return-type-inference = "always"
+    ```
+
+=== "ty.toml"
+
+    ```toml
+    [analysis]
+    return-type-inference = "always"
+    ```
+
+---
+
 ### `strict-equality-semantics`
 
 Configure ty's behavior regarding type inference and narrowing of equality
@@ -827,6 +861,46 @@ Defaults to `true`.
     [overrides.analysis]
     # Disable support for `type: ignore` comments
     respect-type-ignore-comments = false
+    ```
+
+---
+
+#### `return-type-inference`
+
+Controls return type inference for functions without explicit return annotations.
+
+- `"never"`: Do not infer return types from function bodies.
+- `"always"`: Infer return types for unannotated functions and methods.
+
+Explicit return annotations are preserved, and stub bodies are not used for inference.
+Defaults to `"never"`.
+
+Return type inference is not yet implemented; this setting currently has no effect.
+
+**Default value**: `"never"`
+
+**Type**: `"never" | "always"`
+
+**Example usage**:
+
+=== "pyproject.toml"
+
+    ```toml
+    [[tool.ty.overrides]]
+    include = ["src"]
+
+    [tool.ty.overrides.analysis]
+    return-type-inference = "always"
+    ```
+
+=== "ty.toml"
+
+    ```toml
+    [[overrides]]
+    include = ["src"]
+
+    [overrides.analysis]
+    return-type-inference = "always"
     ```
 
 ---

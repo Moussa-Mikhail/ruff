@@ -39,8 +39,8 @@ use ty_python_core::program::{MisconfigurationStrategy, ProgramSettings, PythonE
 use ty_python_semantic::lint::{Level, LintSource, RuleSelection};
 use ty_python_semantic::{
     AnalysisSettings, PythonEnvironment, PythonVersionFileSource, PythonVersionSource,
-    PythonVersionWithSource, SitePackagesDiscoveryError, SitePackagesPaths, SysPrefixPathOrigin,
-    inferred_python_version_source_annotation,
+    PythonVersionWithSource, ReturnTypeInference, SitePackagesDiscoveryError, SitePackagesPaths,
+    SysPrefixPathOrigin, inferred_python_version_source_annotation,
 };
 use ty_static::EnvVars;
 
@@ -1555,6 +1555,24 @@ pub struct TerminalOptions {
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct AnalysisOptions {
+    /// Controls return type inference for functions without explicit return annotations.
+    ///
+    /// - `"never"`: Do not infer return types from function bodies.
+    /// - `"always"`: Infer return types for unannotated functions and methods.
+    ///
+    /// Explicit return annotations are preserved, and stub bodies are not used for inference.
+    /// Defaults to `"never"`.
+    ///
+    /// Return type inference is not yet implemented; this setting currently has no effect.
+    #[option(
+        default = r#""never""#,
+        value_type = r#""never" | "always""#,
+        example = r#"
+            return-type-inference = "always"
+        "#
+    )]
+    pub return_type_inference: Option<ReturnTypeInference>,
+
     /// Whether ty should use strict narrowing for unspecialized generic classes in
     /// `isinstance()` and `issubclass()` checks, `match` class patterns, and `TypeIs` checks.
     ///
@@ -1747,6 +1765,7 @@ impl AnalysisOptions {
         diagnostics: &mut Vec<OptionDiagnostic>,
     ) -> AnalysisSettings {
         let Self {
+            return_type_inference,
             strict_generic_narrowing,
             strict_equality_semantics,
             respect_type_ignore_comments,
@@ -1755,6 +1774,7 @@ impl AnalysisOptions {
         } = self;
 
         let AnalysisSettings {
+            return_type_inference: return_type_inference_default,
             strict_generic_narrowing: strict_generic_narrowing_default,
             strict_equality_semantics: strict_equality_semantics_default,
             respect_type_ignore_comments: respect_type_ignore_default,
@@ -1785,6 +1805,7 @@ impl AnalysisOptions {
             };
 
         AnalysisSettings {
+            return_type_inference: return_type_inference.unwrap_or(return_type_inference_default),
             strict_generic_narrowing: strict_generic_narrowing
                 .unwrap_or(strict_generic_narrowing_default),
             strict_equality_semantics: strict_equality_semantics
