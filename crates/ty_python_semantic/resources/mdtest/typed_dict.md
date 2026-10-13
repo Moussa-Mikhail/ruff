@@ -9468,6 +9468,15 @@ def runtime_type(node: Node0):
     reveal_type(type(value))  # revealed: type[Payload]
 ```
 
+Comparisons also preserve the shared type when narrowing a branch:
+
+```py
+def compare(node: Node0):
+    value = next(iter(node.values()))
+    if value != 1:
+        reveal_type(value)  # revealed: Payload
+```
+
 Checking a write to these values does not duplicate the shared types. The attribute still requires
 an `int`:
 

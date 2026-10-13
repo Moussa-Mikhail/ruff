@@ -726,7 +726,9 @@ impl<'db> TypeVisitor<'db> for AmbiguousNameCollector<'_, 'db> {
                 &self.mapping,
                 || (),
                 |expansion| {
-                    if let Some(unfolded) = expansion.unfold(db, recursive).into_unfolded() {
+                    if let Some(unfolded) =
+                        expansion.expand_recursive(db, recursive).into_unfolded()
+                    {
                         self.visit_type(db, unfolded);
                     }
                 },
@@ -1034,7 +1036,7 @@ impl<'db> Type<'db> {
                             definition,
                             name,
                             constructor.parameters(db),
-                            expansion.unfold(db, constructor).into_type(),
+                            expansion.expand_recursive(db, constructor).into_type(),
                         )
                     },
                 )

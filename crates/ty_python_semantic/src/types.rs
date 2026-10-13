@@ -3067,18 +3067,7 @@ impl<'db> Type<'db> {
     ///
     /// Aliases nested inside non-union types remain unexpanded.
     fn expand_top_level_aliases(self, db: &'db dyn Db, env: &ProgramEnvironment<'db>) -> Self {
-        TypeInspector::inspect_root(
-            db,
-            env,
-            self,
-            |ty, _| ty,
-            |inspector, ty| match ty {
-                Type::Union(union) if union.has_aliases(db) => {
-                    union.expand_aliases(db, inspector.mapping_visitor())
-                }
-                ty => ty,
-            },
-        )
+        TypeInspector::inspect_root(db, env, self, |ty, _| ty, |_, ty| ty)
     }
 
     /// Selects the constructor used for a type variable's upper bound.
@@ -3590,8 +3579,7 @@ impl<'db> Type<'db> {
         }
     }
 
-    /// If the type is a union (or a type alias that resolves to a union), filters union elements
-    /// based on the provided predicate.
+    /// Filter the alternatives exposed by an outer union using the provided predicate.
     ///
     /// Aliases among the elements are expanded first. An element may itself be an alias for a
     /// union, which is otherwise left unexpanded so diagnostics can name it, but filtering is a
@@ -3604,28 +3592,24 @@ impl<'db> Type<'db> {
         env: &ProgramEnvironment<'db>,
         mut f: impl FnMut(&Type<'db>) -> bool,
     ) -> Type<'db> {
-        TypeInspector::inspect_root(
-            db,
-            env,
-            self,
-            |_, _| self,
-            |inspector, ty| {
-                let Type::Union(union) = ty else {
-                    return self;
-                };
-                let union = if union.has_aliases(db) {
-                    match union.expand_aliases(db, inspector.mapping_visitor()) {
-                        Type::Union(expanded) => expanded,
-                        // Expanding collapsed the union to a single type, leaving nothing to filter
-                        // between, so apply the predicate to it directly.
-                        expanded => return if f(&expanded) { expanded } else { Type::Never },
+        TypeInspector::scope(env, |inspector| {
+            inspector.inspect_normalized(
+                db,
+                self,
+                |_, _| self,
+                |_, normalized| match normalized.ty {
+                    Type::Union(union) => union.filter(db, f),
+                    ty if normalized.was_union => {
+                        if f(&ty) {
+                            ty
+                        } else {
+                            Type::Never
+                        }
                     }
-                } else {
-                    union
-                };
-                union.filter(db, f)
-            },
-        )
+                    _ => self,
+                },
+            )
+        })
     }
 
     /// If the type is a union, removes union elements that are disjoint from `target`.
@@ -4041,7 +4025,7 @@ impl<'db> Type<'db> {
     ) {
         f(self, polarity);
 
-        visitor.visit_with_expansion(db, (self, polarity), |expansion| {
+        visitor.visit_structure(db, (self, polarity), |expansion| {
             let Some((_, specialization)) = self.class_specialization(db, env) else {
                 match self {
                     Type::Union(union) => {
@@ -4061,7 +4045,9 @@ impl<'db> Type<'db> {
                         .value_type(db)
                         .visit_specialization_impl(db, env, polarity, f, visitor),
                     Type::Recursive(recursive) => {
-                        if let UnfoldResult::Unfolded(unfolded) = expansion.unfold(db, recursive) {
+                        if let UnfoldResult::Unfolded(unfolded) =
+                            expansion.recursive_body(db, recursive)
+                        {
                             unfolded.visit_specialization_impl(db, env, polarity, f, visitor);
                         }
                     }
@@ -9476,7 +9462,7 @@ impl<'db> Type<'db> {
             }
             Type::Divergent(_) => {}
 
-            Type::Recursive(recursive) => visitor.visit_with_expansion(db, self, |expansion| {
+            Type::Recursive(recursive) => visitor.visit_structure(db, self, |expansion| {
                 // A parameter can occur only in recursive arguments, so unfolding the body
                 // alone may never reach it before the cycle detector stops the traversal.
                 if let Some(arguments) = recursive.arguments(db) {
@@ -9488,7 +9474,7 @@ impl<'db> Type<'db> {
                         visitor,
                     );
                 }
-                if let UnfoldResult::Unfolded(unfolded) = expansion.unfold(db, recursive) {
+                if let UnfoldResult::Unfolded(unfolded) = expansion.recursive_body(db, recursive) {
                     unfolded.find_legacy_typevars_impl(db, env, binding_context, typevars, visitor);
                 }
             }),

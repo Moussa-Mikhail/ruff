@@ -601,9 +601,10 @@ impl<'db> ClassInfoConstraint<'_, 'db> {
                 unreachable!("semantic operation on an unbound recursive variable")
             }
             Type::TypeAlias(alias) => self.generate(db, alias.value_type(db)),
-            Type::Recursive(recursive) => {
-                self.generate(db, expansion.unfold(db, recursive).into_unfolded()?)
-            }
+            Type::Recursive(recursive) => self.generate(
+                db,
+                expansion.expand_recursive(db, recursive).into_unfolded()?,
+            ),
             Type::ClassLiteral(class_literal) => Some(constraint_from_class_literal(class_literal)),
             Type::SubclassOf(subclass_of_ty) => {
                 // We can't narrow negatively from a `SubclassOf` type. `if !isinstance(x, y)`

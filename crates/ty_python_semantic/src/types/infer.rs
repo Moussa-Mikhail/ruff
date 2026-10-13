@@ -885,7 +885,7 @@ impl<'db> TypeContext<'db> {
             .is_some_and(|ty| ty.is_typealias_special_form())
     }
 
-    /// If the type annotation is a union, returns the target elements that it can be narrowed to.
+    /// Return the alternatives of a union, including a single alternative after normalization.
     fn narrow_targets(
         &self,
         db: &'db dyn Db,
@@ -896,26 +896,20 @@ impl<'db> TypeContext<'db> {
             inspector: &TypeInspector<'_, 'db>,
             ty: Type<'db>,
         ) -> Option<Cow<'db, [Type<'db>]>> {
-            inspector.inspect(
+            inspector.inspect_normalized(
                 db,
                 ty,
                 |_, _| None,
-                |inspector, ty| {
-                    let union = match ty {
-                        Type::Union(union) => union,
+                |inspector, normalized| {
+                    match normalized.ty {
+                        Type::Union(union) => Some(Cow::Borrowed(union.elements(db))),
+                        // A union can collapse to one alternative. Use the resolved context
+                        // instead of retrying inference with the original aliases.
+                        ty if normalized.was_union => Some(Cow::Owned(vec![ty])),
                         Type::NewTypeInstance(newtype) => {
-                            return targets(db, inspector, newtype.concrete_base_type(db));
+                            targets(db, inspector, newtype.concrete_base_type(db))
                         }
-                        _ => return None,
-                    };
-                    if union.has_aliases(db) {
-                        let expanded = union.expand_aliases(db, inspector.mapping_visitor());
-                        Some(match expanded {
-                            Type::Union(union) => Cow::Borrowed(union.elements(db)),
-                            _ => Cow::Owned(vec![expanded]),
-                        })
-                    } else {
-                        Some(Cow::Borrowed(union.elements(db)))
+                        _ => None,
                     }
                 },
             )

@@ -441,7 +441,7 @@ impl<'db> EnumValueSet<'db> {
 
         visitor.visit_active_with_expansion(db, ty, |expansion| {
             let expansion = expansion.ok()?;
-            from_type_inner(db, env, expansion.resolve_aliases(db, ty), visitor)
+            from_type_inner(db, env, expansion.normalize(db, ty), visitor)
         })
     }
 
@@ -718,7 +718,7 @@ impl<'db> EnumDomainPartition<'db> {
 
             visitor.visit_active_with_expansion(db, ty, |expansion| {
                 let expansion = expansion.ok()?;
-                let Type::Union(union) = expansion.resolve_aliases(db, ty) else {
+                let Type::Union(union) = expansion.normalize(db, ty) else {
                     alternatives.push(ty);
                     return Some(());
                 };
@@ -799,7 +799,7 @@ impl<'db> EnumDomainSet<'db> {
             visitor: &EnumDomainVisitor<'_, 'db>,
             expansion: &TypeExpansionContext<'_, '_, 'db>,
         ) -> Option<()> {
-            let Type::Union(union) = expansion.resolve_aliases(db, ty) else {
+            let Type::Union(union) = expansion.normalize(db, ty) else {
                 return None;
             };
             for element in union.elements(db) {

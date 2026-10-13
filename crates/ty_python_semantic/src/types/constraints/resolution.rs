@@ -196,8 +196,8 @@ impl<'db> TypeVisitor<'db> for Dependencies<'_, 'db> {
             }
         } else if let Type::Recursive(recursive) = ty {
             self.visited
-                .visit_with_expansion(db, ty, &self.mapping, |expansion| {
-                    if let Some(body) = expansion.unfold(db, recursive).into_unfolded() {
+                .visit_structure(db, ty, &self.mapping, |expansion| {
+                    if let Some(body) = expansion.recursive_body(db, recursive).into_unfolded() {
                         self.visit_type(db, body);
                     }
                 });

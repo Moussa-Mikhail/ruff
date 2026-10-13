@@ -298,7 +298,7 @@ impl<'db> Type<'db> {
             // A partial's wrapped function is fixed, but its reduced signature can differ between
             // views. A structural callable does not identify a particular wrapped function.
             let Type::FunctionLiteral(function) =
-                expansion.resolve_aliases(db, partial.wrapped(db).inner(db))
+                expansion.normalize(db, partial.wrapped(db).inner(db))
             else {
                 return None;
             };
@@ -321,7 +321,7 @@ impl<'db> Type<'db> {
             match ty {
                 Type::Recursive(recursive) => visit_type(db, ty, visitor, |expansion| {
                     expansion
-                        .unfold(db, recursive)
+                        .expand_recursive(db, recursive)
                         .map(|unfolded| upcast(db, env, unfolded, visitor))
                         .unwrap_or(UpcastResult::unstable(ty))
                 }),
@@ -1038,7 +1038,7 @@ fn infer_binary_type_comparison_inner<'db>(
                 visitor.visit_with_expansion(db, (left, op, right), |expansion| {
                     infer_binary_type_comparison_inner(
                         context,
-                        expansion.resolve_aliases(db, left),
+                        expansion.normalize(db, left),
                         op,
                         right,
                         range,
@@ -1055,7 +1055,7 @@ fn infer_binary_type_comparison_inner<'db>(
                         context,
                         left,
                         op,
-                        expansion.resolve_aliases(db, right),
+                        expansion.normalize(db, right),
                         range,
                         visitor,
                     )

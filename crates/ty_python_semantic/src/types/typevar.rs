@@ -575,15 +575,13 @@ impl<'db> TypeVarInstance<'db> {
                         }
                         seen_types.push(identity);
                     }
-                    state
-                        .recursive
-                        .visit_with_expansion(db, inner_ty, |expansion| {
-                            type_is_self_referential_impl(
-                                state,
-                                expansion.unfold(db, recursive).into_type(),
-                                self_identity,
-                            )
-                        })
+                    state.recursive.visit_structure(db, inner_ty, |expansion| {
+                        type_is_self_referential_impl(
+                            state,
+                            expansion.recursive_body(db, recursive).into_type(),
+                            self_identity,
+                        )
+                    })
                 }
                 Type::KnownInstance(KnownInstanceType::TypeAliasType(alias)) => {
                     type_alias_is_self_referential(state, alias, self_identity)

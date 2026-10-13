@@ -107,7 +107,7 @@ impl<'db, 'ast> TypeInferenceBuilder<'db, 'ast> {
                 }
                 Type::TypeAlias(_) | Type::Recursive(_) => {
                     visitor.visit_with_expansion(db, ty, |expansion| {
-                        imp(db, env, expansion.resolve_aliases(db, ty), visitor)
+                        imp(db, env, expansion.normalize(db, ty), visitor)
                     })
                 }
                 _ => None,

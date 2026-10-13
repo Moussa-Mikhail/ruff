@@ -815,12 +815,12 @@ impl<'db> GenericContext<'db> {
             }
 
             fn visit_recursive_type(&self, db: &'db dyn Db, recursive: RecursiveType<'db>) {
-                self.active_aliases.visit_with_expansion(
+                self.active_aliases.visit_structure(
                     &Type::Recursive(recursive).to_type_identity(db),
                     &self.mapping,
                     || (),
                     |expansion| {
-                        self.visit_type(db, expansion.unfold(db, recursive).into_type());
+                        self.visit_type(db, expansion.recursive_body(db, recursive).into_type());
                     },
                 );
             }
@@ -4037,7 +4037,7 @@ impl<'db, 'c> SpecializationBuilder<'db, 'c> {
         //
         // If no elements survive, keep the original union: inferring from `Never` would discard
         // its type variables and skip the bound checks that reject the argument.
-        let actual = if expansion.resolve_aliases(db, actual).is_union() {
+        let actual = if expansion.normalize(db, actual).is_union() {
             let formal = formal
                 .apply_specialization(db, self.generic_context.unknown_specialization(db, None));
             actual
@@ -4082,7 +4082,7 @@ impl<'db, 'c> SpecializationBuilder<'db, 'c> {
             }
             (Type::Recursive(recursive), _) => {
                 return self.infer_map_impl(
-                    expansion.unfold(db, recursive).into_type(),
+                    expansion.expand_recursive(db, recursive).into_type(),
                     actual,
                     polarity,
                     visitor,
@@ -4819,7 +4819,7 @@ impl<'db, 'c> SpecializationBuilder<'db, 'c> {
             (formal, Type::Recursive(recursive)) => {
                 return self.infer_map_impl(
                     formal,
-                    expansion.unfold(db, recursive).into_type(),
+                    expansion.expand_recursive(db, recursive).into_type(),
                     polarity,
                     visitor,
                 );

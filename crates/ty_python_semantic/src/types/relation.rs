@@ -1854,7 +1854,7 @@ impl<'a, 'c, 'db> TypeRelationChecker<'a, 'c, 'db> {
                     };
                     by_arguments.or(db, self.constraints, || {
                         expansion
-                            .unfold(db, source_recursive)
+                            .expand_recursive(db, source_recursive)
                             .map(|source_unfolded| {
                                 self.check_type_pair(db, source_unfolded, target)
                             })
@@ -1869,7 +1869,7 @@ impl<'a, 'c, 'db> TypeRelationChecker<'a, 'c, 'db> {
             (_, Type::Recursive(target_recursive)) => {
                 self.with_recursion_guard(db, source, target, |expansion| {
                     expansion
-                        .unfold(db, target_recursive)
+                        .expand_recursive(db, target_recursive)
                         .map(|target_unfolded| self.check_type_pair(db, source, target_unfolded))
                         .unwrap_or(ConstraintSet::from_bool(
                             self.constraints,
@@ -3465,7 +3465,7 @@ impl<'a, 'c, 'db> DisjointnessChecker<'a, 'c, 'db> {
             (Type::Recursive(left_recursive), _) => {
                 self.with_recursion_guard(db, left, right, |expansion| {
                     expansion
-                        .unfold(db, left_recursive)
+                        .expand_recursive(db, left_recursive)
                         .map(|left_unfolded| self.check_type_pair(db, left_unfolded, right))
                         .unwrap_or(self.never())
                 })
@@ -3474,7 +3474,7 @@ impl<'a, 'c, 'db> DisjointnessChecker<'a, 'c, 'db> {
             (_, Type::Recursive(right_recursive)) => {
                 self.with_recursion_guard(db, left, right, |expansion| {
                     expansion
-                        .unfold(db, right_recursive)
+                        .expand_recursive(db, right_recursive)
                         .map(|right_unfolded| self.check_type_pair(db, left, right_unfolded))
                         .unwrap_or(self.never())
                 })

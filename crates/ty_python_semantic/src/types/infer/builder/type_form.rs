@@ -112,12 +112,7 @@ impl<'db> TypeInferenceBuilder<'db, '_> {
                     .any(|element| imp(builder, expression, element, visitor)),
                 Type::TypeAlias(_) | Type::Recursive(_) => {
                     visitor.visit_with_expansion(db, ty, |expansion| {
-                        imp(
-                            builder,
-                            expression,
-                            expansion.resolve_aliases(db, ty),
-                            visitor,
-                        )
+                        imp(builder, expression, expansion.normalize(db, ty), visitor)
                     })
                 }
                 Type::TypeVar(typevar) => visitor.visit(db, ty, || {

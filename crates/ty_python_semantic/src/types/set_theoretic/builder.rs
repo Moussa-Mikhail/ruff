@@ -43,7 +43,7 @@ use std::convert::Infallible;
 use std::hint::cold_path;
 use std::marker::PhantomData;
 
-use crate::types::recursive::TypeInspector;
+use crate::types::recursive::{StructuralTraversal, StructuralTypeTraversal, TypeInspector};
 use std::ops::ControlFlow;
 
 use super::generic_gradual_intersections::{GenericIntersection, generic_gradual_intersection};
@@ -571,12 +571,12 @@ const MAX_RECURSIVE_UNION_LITERALS: usize = 5;
 const MAX_NON_RECURSIVE_UNION_LITERALS: usize = 8192;
 struct BuildUnion;
 
-impl<'a, 'db> TypeWalk<'db, (&'a mut UnionBuilder<'db>, bool)> for BuildUnion {
+impl<'a, 'db> TypeWalk<'db, (&'a mut UnionBuilder<'db>, bool), StructuralTraversal> for BuildUnion {
     type Output = ();
 
     fn on_cycle(
         &self,
-        traversal: &TypeTraversal<'_, 'db, Self>,
+        traversal: &StructuralTypeTraversal<'_, 'db, Self>,
         ty: Type<'db>,
         kind: CycleKind,
         (builder, _unfold_named): (&'a mut UnionBuilder<'db>, bool),
@@ -589,7 +589,7 @@ impl<'a, 'db> TypeWalk<'db, (&'a mut UnionBuilder<'db>, bool)> for BuildUnion {
     fn visit_alias_like(
         &self,
         db: &'db dyn Db,
-        traversal: &TypeTraversal<'_, 'db, Self>,
+        traversal: &StructuralTypeTraversal<'_, 'db, Self>,
         ty: Type<'db>,
         (builder, unfold_named): (&'a mut UnionBuilder<'db>, bool),
         _visit_body: impl FnOnce((&'a mut UnionBuilder<'db>, bool)),
@@ -611,7 +611,7 @@ impl<'a, 'db> TypeWalk<'db, (&'a mut UnionBuilder<'db>, bool)> for BuildUnion {
     fn visit(
         &self,
         _db: &'db dyn Db,
-        traversal: &TypeTraversal<'_, 'db, Self>,
+        traversal: &StructuralTypeTraversal<'_, 'db, Self>,
         ty: Type<'db>,
         (builder, _unfold_named): (&'a mut UnionBuilder<'db>, bool),
     ) {
@@ -734,7 +734,7 @@ impl<'db> UnionBuilder<'db> {
         self.elements.push(UnionElement::Type(Type::object()));
     }
 
-    fn widen_literal_types(&mut self, traversal: &TypeTraversal<'_, 'db, BuildUnion>) {
+    fn widen_literal_types(&mut self, traversal: &StructuralTypeTraversal<'_, 'db, BuildUnion>) {
         let db = self.db;
         let mut replace_with = vec![];
         for elem in &self.elements {
@@ -770,12 +770,16 @@ impl<'db> UnionBuilder<'db> {
     pub(crate) fn add_in_place(&mut self, ty: Type<'db>) {
         ty.assert_not_recursive_var();
         let env = self.env.clone();
-        TypeTraversal::with_root(&env, BuildUnion, |root| {
+        StructuralTypeTraversal::with_root(&env, BuildUnion, |root| {
             root.visit_with(self.db, ty, (self, false));
         });
     }
 
-    fn add_in_place_impl(&mut self, ty: Type<'db>, traversal: &TypeTraversal<'_, 'db, BuildUnion>) {
+    fn add_in_place_impl(
+        &mut self,
+        ty: Type<'db>,
+        traversal: &StructuralTypeTraversal<'_, 'db, BuildUnion>,
+    ) {
         let db = self.db;
         let cycle_recovery = self.cycle_recovery;
         let should_widen = |literals, recursively_defined: RecursivelyDefined| {
@@ -1093,7 +1097,11 @@ impl<'db> UnionBuilder<'db> {
         }
     }
 
-    fn push_type(&mut self, ty: Type<'db>, traversal: &TypeTraversal<'_, 'db, BuildUnion>) {
+    fn push_type(
+        &mut self,
+        ty: Type<'db>,
+        traversal: &StructuralTypeTraversal<'_, 'db, BuildUnion>,
+    ) {
         let db = self.db;
         let mut ty = ty;
         let bool_pair = |ty: Type<'db>| {
@@ -1410,7 +1418,8 @@ impl<'db> TypeWalk<'db, bool> for IsDisjunctive {
 
 struct BuildIntersection<L>(PhantomData<L>);
 
-impl<'a, 'db, L: IntersectionLimits> TypeWalk<'db, (&'a mut IntersectionBuilder<'db>, bool)>
+impl<'a, 'db, L: IntersectionLimits>
+    TypeWalk<'db, (&'a mut IntersectionBuilder<'db>, bool), StructuralTraversal>
     for BuildIntersection<L>
 {
     type Output = ControlFlow<L::Break>;
@@ -1418,7 +1427,7 @@ impl<'a, 'db, L: IntersectionLimits> TypeWalk<'db, (&'a mut IntersectionBuilder<
     fn visit_alias_like(
         &self,
         db: &'db dyn Db,
-        traversal: &TypeTraversal<'_, 'db, Self>,
+        traversal: &StructuralTypeTraversal<'_, 'db, Self>,
         ty: Type<'db>,
         state: (&'a mut IntersectionBuilder<'db>, bool),
         _visit_body: impl FnOnce((&'a mut IntersectionBuilder<'db>, bool)) -> Self::Output,
@@ -1433,7 +1442,7 @@ impl<'a, 'db, L: IntersectionLimits> TypeWalk<'db, (&'a mut IntersectionBuilder<
 
     fn on_cycle(
         &self,
-        _traversal: &TypeTraversal<'_, 'db, Self>,
+        _traversal: &StructuralTypeTraversal<'_, 'db, Self>,
         ty: Type<'db>,
         _kind: CycleKind,
         (builder, negative): (&'a mut IntersectionBuilder<'db>, bool),
@@ -1451,7 +1460,7 @@ impl<'a, 'db, L: IntersectionLimits> TypeWalk<'db, (&'a mut IntersectionBuilder<
     fn visit(
         &self,
         _db: &'db dyn Db,
-        traversal: &TypeTraversal<'_, 'db, Self>,
+        traversal: &StructuralTypeTraversal<'_, 'db, Self>,
         ty: Type<'db>,
         (builder, negative): (&'a mut IntersectionBuilder<'db>, bool),
     ) -> Self::Output {
@@ -1590,7 +1599,7 @@ impl<'db> IntersectionBuilder<'db> {
         negative: bool,
     ) -> ControlFlow<L::Break> {
         let env = self.env.clone();
-        TypeTraversal::with_root(&env, BuildIntersection::<L>(PhantomData), |root| {
+        StructuralTypeTraversal::with_root(&env, BuildIntersection::<L>(PhantomData), |root| {
             root.visit_with(self.db, ty, (self, negative))
         })
     }
@@ -1598,7 +1607,7 @@ impl<'db> IntersectionBuilder<'db> {
     fn add_positive_impl<L: IntersectionLimits>(
         &mut self,
         ty: Type<'db>,
-        traversal: &TypeTraversal<'_, 'db, BuildIntersection<L>>,
+        traversal: &StructuralTypeTraversal<'_, 'db, BuildIntersection<L>>,
     ) -> ControlFlow<L::Break> {
         let db = self.db;
         match ty {
@@ -1661,7 +1670,7 @@ impl<'db> IntersectionBuilder<'db> {
     fn add_negative_impl<L: IntersectionLimits>(
         &mut self,
         ty: Type<'db>,
-        traversal: &TypeTraversal<'_, 'db, BuildIntersection<L>>,
+        traversal: &StructuralTypeTraversal<'_, 'db, BuildIntersection<L>>,
     ) -> ControlFlow<L::Break> {
         let db = self.db;
         // See comments above in `add_positive`; this is just the negated version.

@@ -1610,13 +1610,7 @@ impl<'db> TypeInferenceBuilder<'db, '_> {
                 env,
                 slice_ty,
                 |_, _| todo_type!("unsupported type[X] special form"),
-                |inspector, slice_ty| {
-                    let slice_ty = match slice_ty {
-                        Type::Union(union) if union.has_aliases(db) => {
-                            union.expand_aliases(db, inspector.mapping_visitor())
-                        }
-                        _ => slice_ty,
-                    };
+                |_, slice_ty| {
                     SubclassOfType::try_from_instance(db, env, slice_ty).unwrap_or_else(
                         |unsupported| match unsupported {
                             Type::Callable(_) => invalid_type_argument(builder, slice),

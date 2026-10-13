@@ -344,20 +344,10 @@ where
             Type::RecursiveVar(_) => {
                 unreachable!("semantic operation on an unbound recursive variable")
             }
-            Type::Union(union) => {
-                // Expansion deduplicates shared definitions before their write requirements are
-                // evaluated. Keep the mapping visitor, including any active materialization.
-                if union.has_aliases(db) {
-                    let expanded = union.expand_aliases(db, traversal.mapping_visitor());
-                    if expanded != object_ty {
-                        return traversal.visit_with(db, expanded, evaluate);
-                    }
-                }
-                AttributeWriteRequirement::All {
-                    object_ty,
-                    element_tys: union.elements(db),
-                }
-            }
+            Type::Union(union) => AttributeWriteRequirement::All {
+                object_ty,
+                element_tys: union.elements(db),
+            },
             Type::Intersection(intersection) => {
                 // TODO: Handle negative intersection elements.
                 AttributeWriteRequirement::Any {

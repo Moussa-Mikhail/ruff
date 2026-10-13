@@ -604,8 +604,8 @@ impl<'db> SpecializationFlowVisitor<'db> {
             RecursiveDefinition::Structural(recursive) => {
                 let visitor: super::recursive::TypeVisitorState<'_, 'db, (), Type<'db>, bool, 1> =
                     super::recursive::TypeVisitorState::new(&self.env, false);
-                return visitor.visit_with_expansion(db, Type::Recursive(recursive), |expansion| {
-                    let Some(body) = expansion.unfold(db, recursive).into_unfolded() else {
+                return visitor.visit_structure(db, Type::Recursive(recursive), |expansion| {
+                    let Some(body) = expansion.recursive_body(db, recursive).into_unfolded() else {
                         return false;
                     };
                     self.visit_type(db, body);

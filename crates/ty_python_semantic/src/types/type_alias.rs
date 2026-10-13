@@ -154,8 +154,8 @@ impl<'db> AliasCycleRecovery<'_, 'db> {
             }),
             Type::Recursive(recursive) => {
                 self.visitor
-                    .visit_with_expansion(db, ty, &self.mapping, |expansion| {
-                        self.recover(db, expansion.unfold(db, recursive).into_unfolded()?)
+                    .visit_structure(db, ty, &self.mapping, |expansion| {
+                        self.recover(db, expansion.recursive_body(db, recursive).into_unfolded()?)
                     })
             }
             Type::Union(union) => {

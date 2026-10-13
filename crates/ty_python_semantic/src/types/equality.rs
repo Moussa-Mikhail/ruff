@@ -557,8 +557,8 @@ impl<'env, 'db> ComparisonEvaluator<'env, 'db> {
                 let Ok(expansion) = expansion else {
                     return ComparisonResult::Ambiguous;
                 };
-                let left = expansion.resolve_aliases(db, left);
-                let right = expansion.resolve_aliases(db, right);
+                let left = expansion.normalize(db, left);
+                let right = expansion.normalize(db, right);
                 evaluate_comparison_once(self, left, right, branch, operator)
             },
         )

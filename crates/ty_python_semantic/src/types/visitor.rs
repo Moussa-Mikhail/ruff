@@ -1,5 +1,6 @@
 use crate::Db;
 use crate::ProgramEnvironment;
+use crate::types::recursive::{StructuralTraversal, StructuralTypeTraversal};
 use std::cell::{Cell, RefCell};
 use std::hash::Hash;
 
@@ -12,7 +13,7 @@ use crate::types::{
     CycleKind, EnumComplementType, GenericAlias, IntersectionType, KnownBoundMethodType,
     KnownInstanceType, NominalInstanceType, PropertyInstanceType, ProtocolInstanceType,
     RecursiveType, SlotDescriptorType, StaticClassLiteral, SubclassOfType, Type, TypeAliasType,
-    TypeFormType, TypeGuardType, TypeIsType, TypeTraversal, TypeWalk, TypedDictType, UnionType,
+    TypeFormType, TypeGuardType, TypeIsType, TypeWalk, TypedDictType, UnionType,
     bound_super::walk_bound_super_type,
     callable::walk_callable_type,
     class::walk_generic_alias,
@@ -152,12 +153,14 @@ pub(crate) trait TypeVisitor<'db> {
 
 struct VisitRecursiveBody;
 
-impl<'db, V: TypeVisitor<'db> + ?Sized> TypeWalk<'db, &V> for VisitRecursiveBody {
+impl<'db, V: TypeVisitor<'db> + ?Sized> TypeWalk<'db, &V, StructuralTraversal>
+    for VisitRecursiveBody
+{
     type Output = ();
 
     fn on_cycle(
         &self,
-        _traversal: &TypeTraversal<'_, 'db, Self>,
+        _traversal: &StructuralTypeTraversal<'_, 'db, Self>,
         _ty: Type<'db>,
         _kind: CycleKind,
         visitor: &V,
@@ -168,7 +171,7 @@ impl<'db, V: TypeVisitor<'db> + ?Sized> TypeWalk<'db, &V> for VisitRecursiveBody
     fn visit(
         &self,
         _db: &'db dyn Db,
-        _traversal: &TypeTraversal<'_, 'db, Self>,
+        _traversal: &StructuralTypeTraversal<'_, 'db, Self>,
         _ty: Type<'db>,
         visitor: &V,
     ) {
@@ -178,7 +181,7 @@ impl<'db, V: TypeVisitor<'db> + ?Sized> TypeWalk<'db, &V> for VisitRecursiveBody
     fn visit_recursive_body(
         &self,
         db: &'db dyn Db,
-        _traversal: &TypeTraversal<'_, 'db, Self>,
+        _traversal: &StructuralTypeTraversal<'_, 'db, Self>,
         body: Type<'db>,
         visitor: &V,
     ) {
@@ -620,12 +623,12 @@ pub(super) fn dynamic_content_impl<'db>(
         }
 
         fn visit_recursive_type(&self, db: &'db dyn Db, recursive: RecursiveType<'db>) {
-            self.active_recursive_types.visit_with_expansion(
+            self.active_recursive_types.visit_structure(
                 &recursive.constructor(db),
                 &self.mapping,
                 || self.record(DynamicContent::Indeterminate),
                 |expansion| {
-                    self.visit_type(db, expansion.unfold(db, recursive).into_type());
+                    self.visit_type(db, expansion.recursive_body(db, recursive).into_type());
                 },
             );
         }
@@ -711,7 +714,7 @@ pub(super) fn contains_growing_type<'db>(
     ty: Type<'db>,
 ) -> bool {
     struct GrowingTypeVisitor<'visit, 'a, 'db> {
-        recursive: &'visit TypeTraversal<'a, 'db, VisitRecursiveBody>,
+        recursive: &'visit StructuralTypeTraversal<'a, 'db, VisitRecursiveBody>,
         env: &'a ProgramEnvironment<'db>,
         recursion_guard: TypeCollector<'db>,
         active_class_protocols: ActiveRecursionDetector<StaticClassLiteral<'db>>,
@@ -801,7 +804,7 @@ pub(super) fn contains_growing_type<'db>(
         }
     }
 
-    TypeTraversal::with_root(env, VisitRecursiveBody, |recursive| {
+    StructuralTypeTraversal::with_root(env, VisitRecursiveBody, |recursive| {
         let visitor = GrowingTypeVisitor {
             recursive,
             env,
@@ -845,7 +848,7 @@ where
     F: Fn(Type<'db>) -> T,
 {
     struct AnyOverTypeVisitor<'db, 'a, 'visit, U> {
-        recursive: &'visit TypeTraversal<'a, 'db, VisitRecursiveBody>,
+        recursive: &'visit StructuralTypeTraversal<'a, 'db, VisitRecursiveBody>,
         env: &'a ProgramEnvironment<'db>,
         query: &'a dyn Fn(Type<'db>) -> U,
         recursion_guard: TypeCollector<'db>,
@@ -904,7 +907,7 @@ where
         }
     }
 
-    TypeTraversal::with_root(env, VisitRecursiveBody, |recursive| {
+    StructuralTypeTraversal::with_root(env, VisitRecursiveBody, |recursive| {
         let visitor = AnyOverTypeVisitor {
             recursive,
             env,
@@ -990,7 +993,7 @@ pub(super) fn any_over_type_expanding_aliases<'db>(
                             )
                         },
                     ),
-                    Type::Recursive(recursive) => active_aliases.visit_with_expansion(
+                    Type::Recursive(recursive) => active_aliases.visit_structure(
                         &nested.to_type_identity(db),
                         mapping,
                         || true,
@@ -998,7 +1001,7 @@ pub(super) fn any_over_type_expanding_aliases<'db>(
                             search(
                                 db,
                                 env,
-                                expansion.unfold(db, recursive).into_type(),
+                                expansion.recursive_body(db, recursive).into_type(),
                                 query,
                                 active_aliases,
                                 mapping,

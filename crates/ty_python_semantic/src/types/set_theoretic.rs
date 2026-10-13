@@ -10,10 +10,11 @@ use crate::place::{
 };
 use crate::types::class::KnownClass;
 use crate::types::enums::EnumComplement;
+use crate::types::recursive::{StructuralTraversal, StructuralTypeTraversal};
 use crate::types::{
     ApplyTypeMappingVisitor, CycleKind, InstanceProjection, ProjectInstance, PromotionKind,
     PromotionMode, Type, TypeContext, TypeMapping, TypePair, TypeQualifiers, TypeQueryContext,
-    TypeTraversal, TypeWalk,
+    TypeWalk,
 };
 use crate::types::{TypeVarBoundOrConstraints, visitor};
 use crate::{Db, FxOrderSet};
@@ -37,12 +38,12 @@ struct UnionExpansionState {
     inside_alias: bool,
 }
 
-impl<'db> TypeWalk<'db, UnionExpansionState> for ExpandUnion<'_, 'db> {
+impl<'db> TypeWalk<'db, UnionExpansionState, StructuralTraversal> for ExpandUnion<'_, 'db> {
     type Output = Result<Vec<Type<'db>>, ()>;
 
     fn on_cycle(
         &self,
-        _traversal: &TypeTraversal<'_, 'db, Self>,
+        _traversal: &StructuralTypeTraversal<'_, 'db, Self>,
         _ty: Type<'db>,
         kind: CycleKind,
         _state: UnionExpansionState,
@@ -56,7 +57,7 @@ impl<'db> TypeWalk<'db, UnionExpansionState> for ExpandUnion<'_, 'db> {
     fn visit_alias_like(
         &self,
         db: &'db dyn Db,
-        _traversal: &TypeTraversal<'_, 'db, Self>,
+        _traversal: &StructuralTypeTraversal<'_, 'db, Self>,
         ty: Type<'db>,
         state: UnionExpansionState,
         visit_body: impl FnOnce(UnionExpansionState) -> Self::Output,
@@ -94,7 +95,7 @@ impl<'db> TypeWalk<'db, UnionExpansionState> for ExpandUnion<'_, 'db> {
     fn visit(
         &self,
         db: &'db dyn Db,
-        traversal: &TypeTraversal<'_, 'db, Self>,
+        traversal: &StructuralTypeTraversal<'_, 'db, Self>,
         ty: Type<'db>,
         state: UnionExpansionState,
     ) -> Self::Output {
@@ -137,7 +138,7 @@ fn expand_union_elements<'db>(
     unfold_named: bool,
 ) -> (Vec<Type<'db>>, RecursivelyDefined) {
     let recursively_defined = Cell::new(RecursivelyDefined::No);
-    let elements = TypeTraversal::with_mapping_visitor(
+    let elements = StructuralTypeTraversal::with_mapping_visitor(
         visitor,
         ExpandUnion {
             seen: RefCell::default(),
