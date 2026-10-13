@@ -1562,8 +1562,6 @@ pub struct AnalysisOptions {
     ///
     /// Explicit return annotations are preserved, and stub bodies are not used for inference.
     /// Defaults to `"never"`.
-    ///
-    /// Return type inference is not yet implemented; this setting currently has no effect.
     #[option(
         default = r#""never""#,
         value_type = r#""never" | "always""#,

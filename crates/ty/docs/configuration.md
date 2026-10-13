@@ -170,8 +170,6 @@ Controls return type inference for functions without explicit return annotations
 Explicit return annotations are preserved, and stub bodies are not used for inference.
 Defaults to `"never"`.
 
-Return type inference is not yet implemented; this setting currently has no effect.
-
 **Default value**: `"never"`
 
 **Type**: `"never" | "always"`
@@ -874,8 +872,6 @@ Controls return type inference for functions without explicit return annotations
 
 Explicit return annotations are preserved, and stub bodies are not used for inference.
 Defaults to `"never"`.
-
-Return type inference is not yet implemented; this setting currently has no effect.
 
 **Default value**: `"never"`
 

@@ -100,7 +100,7 @@
           ]
         },
         "return-type-inference": {
-          "description": "Controls return type inference for functions without explicit return annotations.\n\n- `\"never\"`: Do not infer return types from function bodies.\n- `\"always\"`: Infer return types for unannotated functions and methods.\n\nExplicit return annotations are preserved, and stub bodies are not used for inference.\nDefaults to `\"never\"`.\n\nReturn type inference is not yet implemented; this setting currently has no effect.",
+          "description": "Controls return type inference for functions without explicit return annotations.\n\n- `\"never\"`: Do not infer return types from function bodies.\n- `\"always\"`: Infer return types for unannotated functions and methods.\n\nExplicit return annotations are preserved, and stub bodies are not used for inference.\nDefaults to `\"never\"`.",
           "anyOf": [
             {
               "$ref": "#/definitions/ReturnTypeInference"
