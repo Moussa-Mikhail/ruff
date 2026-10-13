@@ -1229,8 +1229,8 @@ C().value
 
 ### Assigning through a recursive union of descriptors
 
-The `child` field has the union of all `Node` value types, including itself. Checking an assignment
-through that union terminates.
+The `child` field refers to all of `Node`'s value types, including the descriptor in `leaf`.
+Assigning through that descriptor accepts an `int`:
 
 ```py
 from typing import cast
@@ -1251,17 +1251,17 @@ def accepts_integer(holder: Holder):
     holder.attr = 1  # no diagnostic
 ```
 
-The recursive reference does not hide an incompatible setter argument.
+The setter rejects a string:
 
 ```py
 def rejects_string(holder: Holder):
     holder.attr = "invalid"  # error: [invalid-assignment] "Expected `int`"
 ```
 
-### Recursive descriptor unions satisfy writable protocols
+### Writable protocols and recursive descriptors
 
-Checking whether a class implements a writable protocol also visits every possible setter. A
-recursive reference contributes no additional setter requirements.
+A class whose attribute uses this descriptor can satisfy a protocol setter that accepts `int`. The
+recursive type does not change which assignments the setter accepts:
 
 ```py
 from typing import Protocol, cast

@@ -3309,8 +3309,7 @@ reveal_type(Unannotated.value)  # revealed: int
 
 ## Attributes of recursive TypedDict values
 
-A recursive value type retains the attribute declarations of its concrete alternatives. Reads
-preserve the declared type, and writes are checked against it:
+The `child` field refers to the types of all values in `Node`, including the `Payload` in `leaf`:
 
 ```py
 from typing import cast
@@ -3323,7 +3322,12 @@ class Payload:
 class Node(TypedDict, closed=True):
     leaf: Payload
     child: TypeOf[next(iter(cast("Node", {}).values()))]
+```
 
+Reading a value's attribute preserves its declared type. Assignments to that attribute must also
+match the declaration:
+
+```py
 def check(node: Node):
     value = next(iter(node.values()))
     reveal_type(value.value)  # revealed: int

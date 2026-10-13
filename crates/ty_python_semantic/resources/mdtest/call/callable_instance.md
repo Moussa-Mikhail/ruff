@@ -128,7 +128,7 @@ def outer(cond1: bool):
 
 ## Recursive TypedDict values
 
-When a value type refers to itself, we still check calls against its concrete callable alternatives:
+The `child` field refers to the types of all values in `Node`, including the callable in `leaf`:
 
 ```py
 from typing import cast
@@ -142,7 +142,11 @@ class Payload:
 class Node(TypedDict, closed=True):
     leaf: Payload
     child: TypeOf[next(iter(cast("Node", {}).values()))]
+```
 
+Calling a value still requires an `int` argument and returns `str`:
+
+```py
 def check(node: Node):
     value = next(iter(node.values()))
     reveal_type(value(1))  # revealed: str

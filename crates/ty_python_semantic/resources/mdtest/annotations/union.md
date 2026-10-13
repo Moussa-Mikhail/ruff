@@ -123,7 +123,8 @@ range(5) | None  # error: [unsupported-operator]
 
 ## Recursive values containing union objects
 
-The value type of this dictionary includes a union object and a reference to the same value type:
+The `leaf` field holds a union object such as `int | str`. The `child` field refers to the types of
+all values in the same dictionary:
 
 ```py
 from typing import cast

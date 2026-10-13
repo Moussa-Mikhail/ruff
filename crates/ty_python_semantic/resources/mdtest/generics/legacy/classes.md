@@ -796,7 +796,7 @@ NonGenericSubclass[bytes]
 
 ## Reading recursively specialized extra items
 
-Each extra item is another `Node` whose value is a list. A known key retains its declared type:
+For `Node[int]`, each extra item is a `Node[list[int]]`. A declared key retains its own type:
 
 ```py
 from typing import Generic, TypeVar
@@ -1041,8 +1041,8 @@ class Right(TypedDict, Generic[T], closed=True):
     value: TypeOf[next(iter(cast("Left[T]", {}).values()))]
 ```
 
-No concrete value type can be inferred for the recursive field. Attribute access is therefore
-allowed:
+These fields have no non-recursive alternative. Inference leaves their value type unresolved, so
+accessing an attribute does not produce an error:
 
 ```py
 def check(left: Left[int]):
@@ -1139,8 +1139,8 @@ def check(node: Left[Any]):
 
 ## Materializing recursive TypedDict values
 
-Each recursive reference adds a `list` to the type argument. The resulting value can be passed to a
-generic function, but applying `Top` does not make it suitable for keyword unpacking:
+Each recursive reference adds a `list` to the type argument and takes the top materialization of the
+resulting value type:
 
 ```py
 from typing import Any, Generic, TypeVar, cast
@@ -1153,7 +1153,12 @@ T = TypeVar("T")
 class Node(TypedDict, Generic[T], closed=True):
     leaf: T
     child: Top[TypeOf[next(iter(cast("Node[list[T]]", {}).values()))]]
+```
 
+A generic function accepts these values. Keyword unpacking rejects them because they include types
+that are not mappings:
+
+```py
 U = TypeVar("U")
 
 def consume(value: U): ...

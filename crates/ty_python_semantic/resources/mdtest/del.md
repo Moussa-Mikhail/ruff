@@ -342,9 +342,10 @@ del SupportsClassDelete.x
 del RejectsClassDelete.x
 ```
 
-### Recursive value types
+### Deleting attributes of recursive TypedDict values
 
-Deleting an attribute still checks the concrete alternatives of a recursive value type:
+The `child` field refers to all of `Node`'s value types, which include `int`. Those values have no
+`child` attribute to delete:
 
 ```py
 from typing import cast

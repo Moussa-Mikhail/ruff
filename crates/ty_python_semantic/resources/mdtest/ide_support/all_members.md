@@ -496,7 +496,8 @@ def f(x: Intersection[Any, A] | B):
 
 ### Recursive TypedDict values
 
-A value type that refers to itself still exposes the members of its concrete alternatives:
+The `child` field refers to all of `Node`'s value types, including `Payload`. A value still exposes
+the `visible` attribute declared on `Payload`:
 
 ```py
 from typing import cast

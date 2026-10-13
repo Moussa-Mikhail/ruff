@@ -164,7 +164,6 @@ const SYNTHETIC_DATACLASS_ATTRIBUTES: &[&str] = &[
 
 struct CollectMembers<'db> {
     db: &'db dyn Db,
-    env: ProgramEnvironment<'db>,
 }
 
 impl<'db> TypeOperation<'db> for CollectMembers<'db> {
@@ -172,14 +171,18 @@ impl<'db> TypeOperation<'db> for CollectMembers<'db> {
 
     fn on_cycle(
         &self,
-        _traversal: &TypeTraversal<'_, 'db, Self>,
+        traversal: &TypeTraversal<'_, 'db, Self>,
         _ty: Type<'db>,
         kind: CycleKind,
         _state: (),
     ) -> Self::Output {
         match kind {
             CycleKind::Exact => None,
-            CycleKind::MatchingIdentity => Some(all_members(self.db, &self.env, Type::object())),
+            CycleKind::MatchingIdentity => Some(all_members(
+                self.db,
+                traversal.environment(),
+                Type::object(),
+            )),
         }
     }
 
@@ -986,13 +989,6 @@ pub(crate) fn all_members<'db>(
     env: &ProgramEnvironment<'db>,
     ty: Type<'db>,
 ) -> FxHashSet<Member<'db>> {
-    TypeTraversal::with_root(
-        env,
-        CollectMembers {
-            db,
-            env: env.clone(),
-        },
-        |root| root.visit(db, ty),
-    )
-    .unwrap_or_default()
+    TypeTraversal::with_root(env, CollectMembers { db }, |root| root.visit(db, ty))
+        .unwrap_or_default()
 }

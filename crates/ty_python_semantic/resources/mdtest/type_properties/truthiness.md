@@ -281,9 +281,10 @@ def _(a: AllKeysNotRequired) -> None:
     reveal_type(bool(a))  # revealed: bool
 ```
 
-## Recursive value types
+## Truthiness of recursive TypedDict values
 
-A recursive reference to the same value type does not add a falsy alternative:
+The `child` field refers to all of `Node`'s value types. Since the only non-recursive field contains
+`True`, every value is truthy:
 
 ```py
 from typing import cast

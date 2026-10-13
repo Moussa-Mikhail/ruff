@@ -68,7 +68,7 @@ def _(
     reveal_type(e)  # revealed: Unknown
 ```
 
-## Recursive value types
+## Invalid annotations from recursive TypedDict values
 
 The value type of this dictionary includes `int` and a reference to the same value type.
 
@@ -82,7 +82,7 @@ class Node(TypedDict, closed=True):
     child: TypeOf[next(iter(cast("Node", {}).values()))]
 ```
 
-Using such a value in an annotation reports the invalid `int` alternative:
+These values are integers, so they cannot be used as type annotations:
 
 ```py
 value = next(iter(cast(Node, {}).values()))
