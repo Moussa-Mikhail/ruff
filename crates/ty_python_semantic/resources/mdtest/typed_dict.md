@@ -9412,7 +9412,7 @@ def narrow(node: Node):
         reveal_type(value["value"])  # revealed: int
 ```
 
-### Attribute writes through shared recursive values
+### Operations on shared recursive values
 
 These fields refer to the values of every `Node` subclass. The subclasses inherit the same fields,
 so many references lead to the same `Payload` type.
@@ -9452,6 +9452,22 @@ class Node9(Edges): ...
 class Node10(Edges): ...
 ```
 
+Reading an attribute preserves its declared type, even when many recursive paths reach it:
+
+```py
+def read(node: Node0):
+    value = next(iter(node.values()))
+    reveal_type(value.value)  # revealed: int
+```
+
+The values are instances of `Payload`, so their runtime type preserves that class:
+
+```py
+def runtime_type(node: Node0):
+    value = next(iter(node.values()))
+    reveal_type(type(value))  # revealed: type[Payload]
+```
+
 Checking a write to these values does not duplicate the shared types. The attribute still requires
 an `int`:
 
@@ -9460,6 +9476,14 @@ def check(node: Node0):
     value = next(iter(node.values()))
     value.value = 1  # no diagnostic
     value.value = "invalid"  # error: [invalid-assignment]
+```
+
+The attribute can also be deleted:
+
+```py
+def delete(node: Node0):
+    value = next(iter(node.values()))
+    del value.value  # no diagnostic
 ```
 
 [closed]: https://peps.python.org/pep-0728/#disallowing-extra-items-explicitly

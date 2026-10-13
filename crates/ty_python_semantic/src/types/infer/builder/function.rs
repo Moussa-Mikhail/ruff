@@ -1,5 +1,5 @@
 use crate::types::recursive::TypeInspector;
-use crate::types::{CycleKind, TypeOperation, TypeTraversal};
+use crate::types::{CycleKind, TypeQuery, TypeQueryContext};
 use crate::{
     Db, DisplaySettings, FxIndexMap, ProgramEnvironment,
     reachability::is_end_of_scope_reachable,
@@ -2289,17 +2289,17 @@ fn is_instance_tuple_exhaustive<'db>(
         return false;
     }
 
-    TypeTraversal::with_root(env, InstanceTupleCovers(&tuple), |root| root.visit(db, ty))
+    TypeQueryContext::with_root(env, InstanceTupleCovers(&tuple), |root| root.visit(db, ty))
 }
 
 struct InstanceTupleCovers<'a, 'db>(&'a TupleSpec<'db>);
 
-impl<'db> TypeOperation<'db> for InstanceTupleCovers<'_, 'db> {
+impl<'db> TypeQuery<'db> for InstanceTupleCovers<'_, 'db> {
     type Output = bool;
 
     fn on_cycle(
         &self,
-        _traversal: &TypeTraversal<'_, 'db, Self>,
+        _traversal: &TypeQueryContext<'_, 'db, Self>,
         _ty: Type<'db>,
         kind: CycleKind,
         _state: (),
@@ -2310,7 +2310,7 @@ impl<'db> TypeOperation<'db> for InstanceTupleCovers<'_, 'db> {
     fn visit(
         &self,
         db: &'db dyn Db,
-        traversal: &TypeTraversal<'_, 'db, Self>,
+        traversal: &TypeQueryContext<'_, 'db, Self>,
         ty: Type<'db>,
         _state: (),
     ) -> bool {
@@ -2351,17 +2351,17 @@ fn is_instance_truthiness<'db>(
     ty: Type<'db>,
     class: ClassLiteral<'db>,
 ) -> Truthiness {
-    TypeTraversal::with_root(env, InstanceTruthiness(class), |root| root.visit(db, ty))
+    TypeQueryContext::with_root(env, InstanceTruthiness(class), |root| root.visit(db, ty))
 }
 
 struct InstanceTruthiness<'db>(ClassLiteral<'db>);
 
-impl<'db> TypeOperation<'db> for InstanceTruthiness<'db> {
+impl<'db> TypeQuery<'db> for InstanceTruthiness<'db> {
     type Output = Truthiness;
 
     fn on_cycle(
         &self,
-        _traversal: &TypeTraversal<'_, 'db, Self>,
+        _traversal: &TypeQueryContext<'_, 'db, Self>,
         _ty: Type<'db>,
         _kind: CycleKind,
         _state: (),
@@ -2372,7 +2372,7 @@ impl<'db> TypeOperation<'db> for InstanceTruthiness<'db> {
     fn visit(
         &self,
         db: &'db dyn Db,
-        traversal: &TypeTraversal<'_, 'db, Self>,
+        traversal: &TypeQueryContext<'_, 'db, Self>,
         ty: Type<'db>,
         _state: (),
     ) -> Truthiness {

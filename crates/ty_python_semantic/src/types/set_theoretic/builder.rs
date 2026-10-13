@@ -54,8 +54,8 @@ use crate::types::visitor::any_over_type;
 use crate::types::{
     BytesLiteralType, ClassLiteral, CycleKind, EnumLiteralType, IntersectionType, KnownClass,
     KnownInstanceType, LiteralValueType, LiteralValueTypeKind, NegativeIntersectionElements,
-    StringLiteralType, SubclassOfType, Type, TypeOperation, TypePair, TypeTraversal,
-    TypeVarBoundOrConstraints, UnionType,
+    StringLiteralType, SubclassOfType, Type, TypePair, TypeTraversal, TypeVarBoundOrConstraints,
+    TypeWalk, UnionType,
 };
 use crate::{Db, FxIndexSet, FxOrderMap, FxOrderSet, ProgramEnvironment};
 use rustc_hash::FxHashSet;
@@ -571,7 +571,7 @@ const MAX_RECURSIVE_UNION_LITERALS: usize = 5;
 const MAX_NON_RECURSIVE_UNION_LITERALS: usize = 8192;
 struct BuildUnion;
 
-impl<'a, 'db> TypeOperation<'db, (&'a mut UnionBuilder<'db>, bool)> for BuildUnion {
+impl<'a, 'db> TypeWalk<'db, (&'a mut UnionBuilder<'db>, bool)> for BuildUnion {
     type Output = ();
 
     fn on_cycle(
@@ -1359,7 +1359,7 @@ impl IntersectionLimits for BoundedIntersection {
 
 struct IsDisjunctive;
 
-impl<'db> TypeOperation<'db, bool> for IsDisjunctive {
+impl<'db> TypeWalk<'db, bool> for IsDisjunctive {
     type Output = bool;
 
     fn on_cycle(
@@ -1410,7 +1410,7 @@ impl<'db> TypeOperation<'db, bool> for IsDisjunctive {
 
 struct BuildIntersection<L>(PhantomData<L>);
 
-impl<'a, 'db, L: IntersectionLimits> TypeOperation<'db, (&'a mut IntersectionBuilder<'db>, bool)>
+impl<'a, 'db, L: IntersectionLimits> TypeWalk<'db, (&'a mut IntersectionBuilder<'db>, bool)>
     for BuildIntersection<L>
 {
     type Output = ControlFlow<L::Break>;

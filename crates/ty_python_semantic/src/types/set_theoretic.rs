@@ -12,8 +12,8 @@ use crate::types::class::KnownClass;
 use crate::types::enums::EnumComplement;
 use crate::types::{
     ApplyTypeMappingVisitor, CycleKind, InstanceProjection, ProjectInstance, PromotionKind,
-    PromotionMode, Type, TypeContext, TypeMapping, TypeOperation, TypePair, TypeQualifiers,
-    TypeTraversal,
+    PromotionMode, Type, TypeContext, TypeMapping, TypePair, TypeQualifiers, TypeQueryContext,
+    TypeTraversal, TypeWalk,
 };
 use crate::types::{TypeVarBoundOrConstraints, visitor};
 use crate::{Db, FxOrderSet};
@@ -37,7 +37,7 @@ struct UnionExpansionState {
     inside_alias: bool,
 }
 
-impl<'db> TypeOperation<'db, UnionExpansionState> for ExpandUnion<'_, 'db> {
+impl<'db> TypeWalk<'db, UnionExpansionState> for ExpandUnion<'_, 'db> {
     type Output = Result<Vec<Type<'db>>, ()>;
 
     fn on_cycle(
@@ -563,7 +563,7 @@ impl<'db> UnionType<'db> {
     pub(super) fn to_instance(
         self,
         db: &'db dyn Db,
-        traversal: &TypeTraversal<'_, 'db, ProjectInstance>,
+        traversal: &TypeQueryContext<'_, 'db, ProjectInstance>,
     ) -> Option<InstanceProjection<Type<'db>>> {
         let env = traversal.environment();
         let mut is_exact = true;
@@ -1532,7 +1532,7 @@ impl<'db> IntersectionType<'db> {
     pub(super) fn to_instance(
         self,
         db: &'db dyn Db,
-        traversal: &TypeTraversal<'_, 'db, ProjectInstance>,
+        traversal: &TypeQueryContext<'_, 'db, ProjectInstance>,
     ) -> Option<InstanceProjection<Type<'db>>> {
         let env = traversal.environment();
         let mut builder = IntersectionBuilder::new(db, env);

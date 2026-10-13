@@ -994,35 +994,47 @@ where
     }
 
     fn begin_active_visit(&self, db: &'db dyn Db, item: T) -> CycleDetectorVisit<T, R> {
-        let seen = self.seen.borrow();
-        if seen.iter().any(|active| active.item == item) {
-            return CycleDetectorVisit::Ready(self.fallback.clone());
+        let (cycle, identity) = self.check_cycle(db, &item);
+        match cycle {
+            Some(CycleKind::Exact) => return CycleDetectorVisit::Ready(self.fallback.clone()),
+            Some(CycleKind::MatchingIdentity) => return CycleDetectorVisit::Cycle(item),
+            None => {}
         }
-
-        let mut candidates = seen
-            .iter()
-            .filter(|active| item.may_share_identity(db, &active.item))
-            .peekable();
-        let identity = if candidates.peek().is_none() {
-            OnceCell::new()
-        } else {
-            // Deriving an identity can require a structural definition walk. Defer it until a
-            // cheap candidate match shows that another active item could form a cycle.
-            let identity = item.to_identity(db);
-            if candidates.any(|active| {
-                active.identity.get_or_init(|| active.item.to_identity(db)) == &identity
-            }) {
-                return CycleDetectorVisit::Cycle(item);
-            }
-            OnceCell::from(identity)
-        };
-        drop(seen);
 
         self.seen.borrow_mut().push(ActiveCycleDetectorVisit {
             item: item.clone(),
             identity,
         });
         CycleDetectorVisit::Pending(item)
+    }
+
+    /// Check how the current recursion stack would handle `item`, without entering it.
+    pub(super) fn cycle_kind(&self, db: &'db dyn Db, item: &T) -> Option<CycleKind> {
+        self.check_cycle(db, item).0
+    }
+
+    fn check_cycle(&self, db: &'db dyn Db, item: &T) -> (Option<CycleKind>, OnceCell<T::Id>) {
+        let seen = self.seen.borrow();
+        if seen.iter().any(|active| active.item == *item) {
+            return (Some(CycleKind::Exact), OnceCell::new());
+        }
+
+        let mut candidates = seen
+            .iter()
+            .filter(|active| item.may_share_identity(db, &active.item))
+            .peekable();
+        if candidates.peek().is_some() {
+            // Deriving an identity can require a structural definition walk. Defer it until a
+            // cheap candidate match shows that another active item could form a cycle.
+            let identity = item.to_identity(db);
+            if candidates.any(|active| {
+                active.identity.get_or_init(|| active.item.to_identity(db)) == &identity
+            }) {
+                return (Some(CycleKind::MatchingIdentity), OnceCell::from(identity));
+            }
+            return (None, OnceCell::from(identity));
+        }
+        (None, OnceCell::new())
     }
 
     /// Finish a [`CycleDetectorVisit::Pending`] visit and cache its result.
@@ -1210,7 +1222,7 @@ where
 /// Most populated cycle-detector caches contain at most two results. Keep those results inline,
 /// but spill on the third distinct result so lookups in wider caches remain hashed.
 #[derive(Debug, Default)]
-enum CycleDetectorCache<T, R> {
+pub(super) enum CycleDetectorCache<T, R> {
     #[default]
     Empty,
     One((T, R)),
@@ -1219,11 +1231,11 @@ enum CycleDetectorCache<T, R> {
 }
 
 impl<T, R> CycleDetectorCache<T, R> {
-    const fn new() -> Self {
+    pub(super) const fn new() -> Self {
         Self::Empty
     }
 
-    fn get(&self, item: &T) -> Option<&R>
+    pub(super) fn get(&self, item: &T) -> Option<&R>
     where
         T: Hash + Eq,
     {
@@ -1234,6 +1246,23 @@ impl<T, R> CycleDetectorCache<T, R> {
                 .iter()
                 .find_map(|(cached_item, result)| (cached_item == item).then_some(result)),
             Self::Spilled(cache) => cache.get(item),
+        }
+    }
+
+    /// Store a result, replacing an answer that no longer applies in the current context.
+    pub(super) fn insert(&mut self, item: T, result: R)
+    where
+        T: Hash + Eq,
+    {
+        let entries = match self {
+            Self::One(entry) => std::slice::from_mut(entry),
+            Self::Two(entries) => entries.as_mut_slice(),
+            Self::Empty | Self::Spilled(_) => &mut [],
+        };
+        if let Some((_, cached)) = entries.iter_mut().find(|(key, _)| *key == item) {
+            *cached = result;
+        } else {
+            self.insert_new(item, result);
         }
     }
 
@@ -1284,17 +1313,24 @@ impl<T, R> CycleDetectorCache<T, R> {
 #[derive(Debug)]
 pub(crate) struct ActiveRecursionDetector<T> {
     seen: RefCell<FxHashSet<T>>,
+    revision: Cell<u64>,
 }
 
 impl<T> Default for ActiveRecursionDetector<T> {
     fn default() -> Self {
         Self {
             seen: RefCell::new(FxHashSet::default()),
+            revision: Cell::new(0),
         }
     }
 }
 
 impl<T: Hash + Eq + Clone> ActiveRecursionDetector<T> {
+    /// Changes whenever an active guard enters or leaves, including during unwinding.
+    pub(super) fn revision(&self) -> u64 {
+        self.revision.get()
+    }
+
     pub(crate) fn is_empty(&self) -> bool {
         self.seen.borrow().is_empty()
     }
@@ -1308,11 +1344,13 @@ impl<T: Hash + Eq + Clone> ActiveRecursionDetector<T> {
         if !self.seen.borrow_mut().insert(item.clone()) {
             return on_cycle();
         }
+        self.revision.set(self.revision.get().wrapping_add(1));
 
         // Keep the active-recursion state scoped even if `func` unwinds. In some cases, we catch
         // panics and continue handling later work on the same thread.
         let _guard = ActiveRecursionGuard {
             seen: &self.seen,
+            revision: &self.revision,
             item,
         };
 
@@ -1322,12 +1360,14 @@ impl<T: Hash + Eq + Clone> ActiveRecursionDetector<T> {
 
 struct ActiveRecursionGuard<'a, T: Hash + Eq> {
     seen: &'a RefCell<FxHashSet<T>>,
+    revision: &'a Cell<u64>,
     item: &'a T,
 }
 
 impl<T: Hash + Eq> Drop for ActiveRecursionGuard<'_, T> {
     fn drop(&mut self) {
         self.seen.borrow_mut().remove(self.item);
+        self.revision.set(self.revision.get().wrapping_add(1));
     }
 }
 

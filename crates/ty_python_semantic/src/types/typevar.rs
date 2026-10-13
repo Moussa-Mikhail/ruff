@@ -18,7 +18,7 @@ use crate::{
         ApplySpecialization, ApplyTypeMappingVisitor, CycleDetector, DynamicType, GenericContext,
         InstanceProjection, IntersectionType, KnownClass, KnownInstanceType, MaterializationKind,
         Parameter, Parameters, ProjectInstance, Specialization, Type, TypeAliasType, TypeContext,
-        TypeMapping, TypeTraversal, TypeVarVariance, UnionBuilder, UnionType, any_over_type,
+        TypeMapping, TypeQueryContext, TypeVarVariance, UnionBuilder, UnionType, any_over_type,
         any_over_type_including_alias_arguments, binding_type,
         cyclic::TypeIdentity,
         definition_expression_type,
@@ -428,7 +428,7 @@ impl<'db> TypeVarInstance<'db> {
     fn to_instance(
         self,
         db: &'db dyn Db,
-        traversal: &TypeTraversal<'_, 'db, ProjectInstance>,
+        traversal: &TypeQueryContext<'_, 'db, ProjectInstance>,
     ) -> Option<InstanceProjection<Self>> {
         let env = traversal.environment();
         let bound_or_constraints = match self.bound_or_constraints(db, env)? {
@@ -1618,7 +1618,7 @@ impl<'db> BoundTypeVarInstance<'db> {
     pub(super) fn to_instance(
         self,
         db: &'db dyn Db,
-        traversal: &TypeTraversal<'_, 'db, ProjectInstance>,
+        traversal: &TypeQueryContext<'_, 'db, ProjectInstance>,
     ) -> Option<InstanceProjection<Self>> {
         Some(self.typevar(db).to_instance(db, traversal)?.map(|typevar| {
             Self::new(
@@ -2118,7 +2118,7 @@ impl<'db> TypeVarConstraints<'db> {
     fn to_instance(
         self,
         db: &'db dyn Db,
-        traversal: &TypeTraversal<'_, 'db, ProjectInstance>,
+        traversal: &TypeQueryContext<'_, 'db, ProjectInstance>,
     ) -> Option<InstanceProjection<TypeVarConstraints<'db>>> {
         let mut instance_elements = Vec::new();
         let mut is_exact = true;

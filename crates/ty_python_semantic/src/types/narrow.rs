@@ -21,11 +21,12 @@ use crate::types::{
     ApplyTypeMappingVisitor, CallableType, ClassBase, ClassLiteral, ClassPatternPositionalSource,
     ClassType, CycleDetector, CycleKind, IntersectionBuilder, IntersectionType, KnownClass,
     KnownInstanceType, LiteralValueTypeKind, Parameter, Parameters, Signature, SpecialFormType,
-    SubclassOfInner, SubclassOfType, Truthiness, Type, TypeContext, TypeOperation, TypeTraversal,
-    TypeVarBoundOrConstraints, UnionBuilder, binding_type, class_pattern_positional_sources,
-    definite_match_pattern_type_for_subject, exact_sequence_pattern_type, infer_expression_types,
-    mapping_pattern_type, pattern_binding_fallthrough_type, sequence_pattern_type_builder,
-    singleton_pattern_type, starred_sequence_pattern_type, typed_dict_matches_class_pattern,
+    SubclassOfInner, SubclassOfType, Truthiness, Type, TypeContext, TypeQuery, TypeQueryContext,
+    TypeTraversal, TypeVarBoundOrConstraints, TypeWalk, UnionBuilder, binding_type,
+    class_pattern_positional_sources, definite_match_pattern_type_for_subject,
+    exact_sequence_pattern_type, infer_expression_types, mapping_pattern_type,
+    pattern_binding_fallthrough_type, sequence_pattern_type_builder, singleton_pattern_type,
+    starred_sequence_pattern_type, typed_dict_matches_class_pattern,
 };
 use crate::{Db, ProgramEnvironment};
 use ty_python_core::ast_ids::HasScopedUseId;
@@ -5397,7 +5398,7 @@ impl<'db> NarrowingConstraintsBuilder<'db, '_> {
     // `NarrowingConstraint::intersection` at the call site instead of constructing a replacement
     // type here.
     fn narrow_with_present_key(&self, ty: Type<'db>, key: &str) -> Type<'db> {
-        TypeTraversal::with_root(&self.env, NarrowWithPresentKey(key), |root| {
+        TypeQueryContext::with_root(&self.env, NarrowWithPresentKey(key), |root| {
             root.visit(self.db, ty)
         })
     }
@@ -5657,12 +5658,12 @@ impl<'db> NarrowingConstraintsBuilder<'db, '_> {
 
 struct NarrowWithPresentKey<'a>(&'a str);
 
-impl<'db> TypeOperation<'db> for NarrowWithPresentKey<'_> {
+impl<'db> TypeQuery<'db> for NarrowWithPresentKey<'_> {
     type Output = Type<'db>;
 
     fn on_cycle(
         &self,
-        _traversal: &TypeTraversal<'_, 'db, Self>,
+        _traversal: &TypeQueryContext<'_, 'db, Self>,
         ty: Type<'db>,
         kind: CycleKind,
         _state: (),
@@ -5676,7 +5677,7 @@ impl<'db> TypeOperation<'db> for NarrowWithPresentKey<'_> {
     fn visit(
         &self,
         db: &'db dyn Db,
-        traversal: &TypeTraversal<'_, 'db, Self>,
+        traversal: &TypeQueryContext<'_, 'db, Self>,
         ty: Type<'db>,
         _state: (),
     ) -> Self::Output {
@@ -5714,7 +5715,7 @@ fn is_or_contains_typeddict<'db>(
     env: &ProgramEnvironment<'db>,
     ty: Type<'db>,
 ) -> bool {
-    TypeTraversal::with_root(env, ContainsTypedDict { key: None }, |root| {
+    TypeQueryContext::with_root(env, ContainsTypedDict { key: None }, |root| {
         root.visit(db, ty)
     })
 }
@@ -5725,7 +5726,7 @@ fn typeddict_declares_key<'db>(
     ty: Type<'db>,
     key: &str,
 ) -> bool {
-    TypeTraversal::with_root(env, ContainsTypedDict { key: Some(key) }, |root| {
+    TypeQueryContext::with_root(env, ContainsTypedDict { key: Some(key) }, |root| {
         root.visit(db, ty)
     })
 }
@@ -5734,12 +5735,12 @@ struct ContainsTypedDict<'a> {
     key: Option<&'a str>,
 }
 
-impl<'db> TypeOperation<'db> for ContainsTypedDict<'_> {
+impl<'db> TypeQuery<'db> for ContainsTypedDict<'_> {
     type Output = bool;
 
     fn on_cycle(
         &self,
-        _traversal: &TypeTraversal<'_, 'db, Self>,
+        _traversal: &TypeQueryContext<'_, 'db, Self>,
         _ty: Type<'db>,
         _kind: CycleKind,
         _state: (),
@@ -5750,7 +5751,7 @@ impl<'db> TypeOperation<'db> for ContainsTypedDict<'_> {
     fn visit(
         &self,
         db: &'db dyn Db,
-        traversal: &TypeTraversal<'_, 'db, Self>,
+        traversal: &TypeQueryContext<'_, 'db, Self>,
         ty: Type<'db>,
         _state: (),
     ) -> bool {
@@ -5852,7 +5853,7 @@ struct VisitTypedDictField<'a> {
     field_name: &'a str,
 }
 
-impl<'a, 'db, F: FnMut(Type<'db>)> TypeOperation<'db, &'a mut F> for VisitTypedDictField<'_> {
+impl<'a, 'db, F: FnMut(Type<'db>)> TypeWalk<'db, &'a mut F> for VisitTypedDictField<'_> {
     type Output = ();
 
     fn on_cycle(

@@ -3,7 +3,7 @@ use crate::ProgramEnvironment;
 use crate::types::{
     AwaitError, Bindings, CallArguments, CallDunderError, CycleKind, KnownClass,
     LintDiagnosticGuard, LintDiagnosticGuardBuilder, LiteralValueTypeKind, Type, TypeContext,
-    TypeOperation, TypeTraversal, TypeVarBoundOrConstraints, UnionType,
+    TypeQuery, TypeQueryContext, TypeVarBoundOrConstraints, UnionType,
     call::CallErrorKind,
     context::InferContext,
     diagnostic::NOT_ITERABLE,
@@ -243,7 +243,7 @@ impl<'db> Type<'db> {
         env: &ProgramEnvironment<'db>,
         mode: EvaluationMode,
     ) -> Result<Cow<'db, TupleSpec<'db>>, IterationError<'db>> {
-        TypeTraversal::with_root(env, TryIterate(mode), |root| {
+        TypeQueryContext::with_root(env, TryIterate(mode), |root| {
             root.visit_with(db, self, true)
         })
         .map(|spec| spec.unwrap_or_else(|| Cow::Owned(TupleSpec::homogeneous(Type::unknown()))))
@@ -254,14 +254,14 @@ impl<'db> Type<'db> {
         db: &'db dyn Db,
         env: &ProgramEnvironment<'db>,
         mode: EvaluationMode,
-        traversal: &TypeTraversal<'_, 'db, TryIterate>,
+        traversal: &TypeQueryContext<'_, 'db, TryIterate, bool>,
         allow_dunders: bool,
     ) -> Result<Option<Cow<'db, TupleSpec<'db>>>, IterationError<'db>> {
         fn non_async_special_case<'db>(
             db: &'db dyn Db,
             env: &ProgramEnvironment<'db>,
             ty: Type<'db>,
-            traversal: &TypeTraversal<'_, 'db, TryIterate>,
+            traversal: &TypeQueryContext<'_, 'db, TryIterate, bool>,
         ) -> Option<Cow<'db, TupleSpec<'db>>> {
             // We will not infer precise heterogeneous tuple specs for literals with lengths above this threshold.
             // The threshold here is somewhat arbitrary and conservative; it could be increased if needed.
@@ -628,12 +628,12 @@ impl<'db> Type<'db> {
 
 struct TryIterate(EvaluationMode);
 
-impl<'db> TypeOperation<'db, bool> for TryIterate {
+impl<'db> TypeQuery<'db, bool> for TryIterate {
     type Output = Result<Option<Cow<'db, TupleSpec<'db>>>, IterationError<'db>>;
 
     fn on_cycle(
         &self,
-        _traversal: &TypeTraversal<'_, 'db, Self>,
+        _traversal: &TypeQueryContext<'_, 'db, Self, bool>,
         _ty: Type<'db>,
         kind: CycleKind,
         _allow_dunders: bool,
@@ -649,7 +649,7 @@ impl<'db> TypeOperation<'db, bool> for TryIterate {
     fn visit(
         &self,
         db: &'db dyn Db,
-        traversal: &TypeTraversal<'_, 'db, Self>,
+        traversal: &TypeQueryContext<'_, 'db, Self, bool>,
         ty: Type<'db>,
         allow_dunders: bool,
     ) -> Self::Output {
@@ -664,7 +664,7 @@ impl<'db> TypeOperation<'db, bool> for TryIterate {
 }
 
 /// Error returned if a type is not (or may not be) iterable.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(super) enum IterationError<'db> {
     /// The object being iterated over has a bound `__(a)iter__` method,
     /// but calling it with the expected arguments results in an error.

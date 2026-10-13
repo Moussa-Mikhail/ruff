@@ -169,7 +169,9 @@ mod protocol_class;
 mod recursive;
 pub(crate) use recursive::RecursiveMapping;
 pub(crate) use recursive::UnfoldResult;
-pub use recursive::{RecursiveType, RecursiveVar, TypeOperation, TypeTraversal};
+pub use recursive::{
+    RecursiveType, RecursiveVar, TypeQuery, TypeQueryContext, TypeTraversal, TypeWalk,
+};
 use recursive::{TypeInspector, TypeVisitorState};
 pub(crate) mod relation;
 mod relation_error;
@@ -484,6 +486,26 @@ fn definition_expression_annotation<'db>(
 #[derive(Default)]
 struct TypeRecursionContext<'db> {
     meta_type: MetaTypeRecursion<'db>,
+}
+
+impl TypeRecursionContext<'_> {
+    /// Identify the shared guard state under which a query result can be reused.
+    fn revision(&self) -> [u64; 3] {
+        // Keep the pattern exhaustive: adding a guard also changes the context of cached queries.
+        let Self {
+            meta_type:
+                MetaTypeRecursion {
+                    aliases,
+                    growing_aliases,
+                    typevars,
+                },
+        } = self;
+        [
+            aliases.revision(),
+            growing_aliases.revision(),
+            typevars.revision(),
+        ]
+    }
 }
 
 /// Guards shared by meta-type projections and the specializations they trigger.
@@ -835,12 +857,12 @@ fn descriptor_get_result<'db>(
 
 struct IsDefinitelyNonDataDescriptor;
 
-impl<'db> TypeOperation<'db> for IsDefinitelyNonDataDescriptor {
+impl<'db> TypeQuery<'db> for IsDefinitelyNonDataDescriptor {
     type Output = bool;
 
     fn on_cycle(
         &self,
-        _traversal: &TypeTraversal<'_, 'db, Self>,
+        _traversal: &TypeQueryContext<'_, 'db, Self>,
         _ty: Type<'db>,
         kind: CycleKind,
         _state: (),
@@ -851,7 +873,7 @@ impl<'db> TypeOperation<'db> for IsDefinitelyNonDataDescriptor {
     fn visit(
         &self,
         db: &'db dyn Db,
-        traversal: &TypeTraversal<'_, 'db, Self>,
+        traversal: &TypeQueryContext<'_, 'db, Self>,
         ty: Type<'db>,
         _state: (),
     ) -> bool {
@@ -876,12 +898,12 @@ struct IsDataDescriptor {
     any_of_union: bool,
 }
 
-impl<'db> TypeOperation<'db> for IsDataDescriptor {
+impl<'db> TypeQuery<'db> for IsDataDescriptor {
     type Output = bool;
 
     fn on_cycle(
         &self,
-        _traversal: &TypeTraversal<'_, 'db, Self>,
+        _traversal: &TypeQueryContext<'_, 'db, Self>,
         _ty: Type<'db>,
         kind: CycleKind,
         _state: (),
@@ -895,7 +917,7 @@ impl<'db> TypeOperation<'db> for IsDataDescriptor {
     fn visit(
         &self,
         db: &'db dyn Db,
-        traversal: &TypeTraversal<'_, 'db, Self>,
+        traversal: &TypeQueryContext<'_, 'db, Self>,
         ty: Type<'db>,
         _state: (),
     ) -> bool {
@@ -4082,7 +4104,7 @@ impl<'db> Type<'db> {
     /// Note: This function aims to have no false positives, but might return `false`
     /// for more complicated types that are actually singletons.
     fn is_singleton(self, db: &'db dyn Db, env: &ProgramEnvironment<'db>) -> bool {
-        TypeTraversal::with_root(env, IsSingleton, |root| root.visit(db, self))
+        TypeQueryContext::with_root(env, IsSingleton, |root| root.visit(db, self))
     }
 
     /// This function is roughly equivalent to `find_name_in_mro` as defined in the [descriptor guide] or
@@ -4113,12 +4135,12 @@ impl<'db> Type<'db> {
             policy: MemberLookupPolicy,
         }
 
-        impl<'db> TypeOperation<'db> for LookupMroMember<'_> {
+        impl<'db> TypeQuery<'db> for LookupMroMember<'_> {
             type Output = Option<PlaceAndQualifiers<'db>>;
 
             fn on_cycle(
                 &self,
-                _traversal: &TypeTraversal<'_, 'db, Self>,
+                _traversal: &TypeQueryContext<'_, 'db, Self>,
                 _ty: Type<'db>,
                 kind: CycleKind,
                 _state: (),
@@ -4135,7 +4157,7 @@ impl<'db> Type<'db> {
             fn visit(
                 &self,
                 db: &'db dyn Db,
-                traversal: &TypeTraversal<'_, 'db, Self>,
+                traversal: &TypeQueryContext<'_, 'db, Self>,
                 ty: Type<'db>,
                 _state: (),
             ) -> Self::Output {
@@ -4296,7 +4318,7 @@ impl<'db> Type<'db> {
             }
         }
 
-        TypeTraversal::with_root(env, LookupMroMember { name, policy }, |traversal| {
+        TypeQueryContext::with_root(env, LookupMroMember { name, policy }, |traversal| {
             traversal.visit(db, *self)
         })
     }
@@ -4763,12 +4785,12 @@ impl<'db> Type<'db> {
             name: &'a str,
         }
 
-        impl<'db> TypeOperation<'db> for LookupInstanceMember<'_> {
+        impl<'db> TypeQuery<'db> for LookupInstanceMember<'_> {
             type Output = Option<PlaceAndQualifiers<'db>>;
 
             fn on_cycle(
                 &self,
-                _traversal: &TypeTraversal<'_, 'db, Self>,
+                _traversal: &TypeQueryContext<'_, 'db, Self>,
                 _ty: Type<'db>,
                 kind: CycleKind,
                 _state: (),
@@ -4782,7 +4804,7 @@ impl<'db> Type<'db> {
             fn visit(
                 &self,
                 db: &'db dyn Db,
-                traversal: &TypeTraversal<'_, 'db, Self>,
+                traversal: &TypeQueryContext<'_, 'db, Self>,
                 ty: Type<'db>,
                 _state: (),
             ) -> Self::Output {
@@ -4892,7 +4914,7 @@ impl<'db> Type<'db> {
             }
         }
 
-        TypeTraversal::with_root(env, LookupInstanceMember { name }, |traversal| {
+        TypeQueryContext::with_root(env, LookupInstanceMember { name }, |traversal| {
             traversal.visit(db, *self).unwrap_or_default()
         })
     }
@@ -5065,12 +5087,12 @@ impl<'db> Type<'db> {
                 owner: Type<'db>,
             }
 
-            impl<'db> TypeOperation<'db> for DescriptorGet<'db> {
+            impl<'db> TypeQuery<'db> for DescriptorGet<'db> {
                 type Output = Result<Option<DescriptorGetResult<'db>>, DescriptorGetError<'db>>;
 
                 fn on_cycle(
                     &self,
-                    _traversal: &TypeTraversal<'_, 'db, Self>,
+                    _traversal: &TypeQueryContext<'_, 'db, Self>,
                     _ty: Type<'db>,
                     _kind: CycleKind,
                     _state: (),
@@ -5081,7 +5103,7 @@ impl<'db> Type<'db> {
                 fn visit(
                     &self,
                     db: &'db dyn Db,
-                    traversal: &TypeTraversal<'_, 'db, Self>,
+                    traversal: &TypeQueryContext<'_, 'db, Self>,
                     ty: Type<'db>,
                     _state: (),
                 ) -> Self::Output {
@@ -5217,7 +5239,7 @@ impl<'db> Type<'db> {
             }
 
             let env = ProgramEnvironment::from_program(program);
-            TypeTraversal::with_root(&env, DescriptorGet { instance, owner }, |root| {
+            TypeQueryContext::with_root(&env, DescriptorGet { instance, owner }, |root| {
                 root.visit(db, ty)
             })
         }
@@ -5507,7 +5529,7 @@ impl<'db> Type<'db> {
         program: Program<'db>,
     ) -> bool {
         let env = ProgramEnvironment::from_program(program);
-        TypeTraversal::with_root(&env, IsDefinitelyNonDataDescriptor, |traversal| {
+        TypeQueryContext::with_root(&env, IsDefinitelyNonDataDescriptor, |traversal| {
             traversal.visit(db, self)
         })
     }
@@ -5526,7 +5548,7 @@ impl<'db> Type<'db> {
         any_of_union: bool,
     ) -> bool {
         let env = ProgramEnvironment::from_program(program);
-        TypeTraversal::with_root(&env, IsDataDescriptor { any_of_union }, |traversal| {
+        TypeQueryContext::with_root(&env, IsDataDescriptor { any_of_union }, |traversal| {
             traversal.visit(db, self)
         })
     }
@@ -5873,12 +5895,12 @@ impl<'db> Type<'db> {
             key: MemberLookupKey<'db>,
         }
 
-        impl<'db> TypeOperation<'db, Option<Type<'db>>> for LookupMember<'db> {
+        impl<'db> TypeQuery<'db, Option<Type<'db>>> for LookupMember<'db> {
             type Output = Option<MemberLookupResult<'db>>;
 
             fn on_cycle(
                 &self,
-                traversal: &TypeTraversal<'_, 'db, Self>,
+                traversal: &TypeQueryContext<'_, 'db, Self, Option<Type<'db>>>,
                 _ty: Type<'db>,
                 kind: CycleKind,
                 _receiver: Option<Type<'db>>,
@@ -5913,7 +5935,7 @@ impl<'db> Type<'db> {
             fn visit(
                 &self,
                 db: &'db dyn Db,
-                traversal: &TypeTraversal<'_, 'db, Self>,
+                traversal: &TypeQueryContext<'_, 'db, Self, Option<Type<'db>>>,
                 ty: Type<'db>,
                 receiver: Option<Type<'db>>,
             ) -> Self::Output {
@@ -5934,7 +5956,7 @@ impl<'db> Type<'db> {
             receiver: Option<Type<'db>>,
         ) -> MemberLookupResult<'db> {
             let env = ProgramEnvironment::from_program(key.program(db));
-            TypeTraversal::with_root(&env, LookupMember { db, key }, |root| {
+            TypeQueryContext::with_root(&env, LookupMember { db, key }, |root| {
                 root.visit_with(db, key.ty(db), receiver)
             })
             .unwrap_or_else(|| Place::bound(Type::unknown()).into())
@@ -5945,7 +5967,7 @@ impl<'db> Type<'db> {
             env: &ProgramEnvironment<'db>,
             bound_or_constraints: TypeVarBoundOrConstraints<'db>,
             symbolic_receiver: Type<'db>,
-            traversal: &TypeTraversal<'_, 'db, LookupMember<'db>>,
+            traversal: &TypeQueryContext<'_, 'db, LookupMember<'db>, Option<Type<'db>>>,
         ) -> Option<MemberLookupResult<'db>> {
             match bound_or_constraints {
                 TypeVarBoundOrConstraints::UpperBound(bound) => {
@@ -6022,7 +6044,7 @@ impl<'db> Type<'db> {
             db: &'db dyn Db,
             key: MemberLookupKey<'db>,
             receiver: Option<Type<'db>>,
-            traversal: &TypeTraversal<'_, 'db, LookupMember<'db>>,
+            traversal: &TypeQueryContext<'_, 'db, LookupMember<'db>, Option<Type<'db>>>,
         ) -> Option<MemberLookupResult<'db>> {
             fn promote_inferred_attribute_class_literals<'db>(
                 db: &'db dyn Db,
@@ -7022,7 +7044,7 @@ impl<'db> Type<'db> {
         env: &ProgramEnvironment<'db>,
         recursion_guard: &ActiveRecursionDetector<Type<'db>>,
     ) -> Bindings<'db> {
-        TypeTraversal::with_root(env, CollectBindings { recursion_guard }, |root| {
+        TypeQueryContext::with_root(env, CollectBindings { recursion_guard }, |root| {
             root.visit_with(db, self, None)
         })
         .unwrap_or_else(|| CallableBinding::not_callable(self).into())
@@ -7033,7 +7055,7 @@ impl<'db> Type<'db> {
         db: &'db dyn Db,
         env: &ProgramEnvironment<'db>,
         operation: &CollectBindings<'a, 'db>,
-        traversal: &TypeTraversal<'_, 'db, CollectBindings<'a, 'db>>,
+        traversal: &TypeQueryContext<'_, 'db, CollectBindings<'a, 'db>, Option<Type<'db>>>,
         receiver: Option<Type<'db>>,
     ) -> Option<Bindings<'db>> {
         let recursion_guard = operation.recursion_guard;
@@ -8666,7 +8688,7 @@ impl<'db> Type<'db> {
         env: &ProgramEnvironment<'db>,
         mode: GeneratorTypeMode,
     ) -> Option<GeneratorTypes<'db>> {
-        TypeTraversal::with_root(env, InspectGenerator(mode), |root| root.visit(db, self))
+        TypeQueryContext::with_root(env, InspectGenerator(mode), |root| root.visit(db, self))
             .ok()
             .flatten()
     }
@@ -8680,7 +8702,7 @@ impl<'db> Type<'db> {
         db: &'db dyn Db,
         env: &ProgramEnvironment<'db>,
     ) -> Option<Type<'db>> {
-        TypeTraversal::with_root(env, GeneratorAnnotationSendType, |root| {
+        TypeQueryContext::with_root(env, GeneratorAnnotationSendType, |root| {
             root.visit(db, self)
         })
     }
@@ -8704,7 +8726,7 @@ impl<'db> Type<'db> {
         env: &ProgramEnvironment<'db>,
         send_ty: Type<'db>,
     ) -> Option<Type<'db>> {
-        TypeTraversal::with_root(env, IncompatibleYieldFromSendType(send_ty), |root| {
+        TypeQueryContext::with_root(env, IncompatibleYieldFromSendType(send_ty), |root| {
             root.visit(db, self)
         })
     }
@@ -8730,7 +8752,7 @@ impl<'db> Type<'db> {
         db: &'db dyn Db,
         env: &ProgramEnvironment<'db>,
     ) -> Option<InstanceProjection<Type<'db>>> {
-        TypeTraversal::with_root(env, ProjectInstance, |root| root.visit(db, self))
+        TypeQueryContext::with_root(env, ProjectInstance, |root| root.visit(db, self))
     }
 
     /// If we see a value of this type used as a type expression, what type does it name?
@@ -8750,7 +8772,7 @@ impl<'db> Type<'db> {
         inference_flags: InferenceFlags,
     ) -> Result<Type<'db>, InvalidTypeExpressionError<'db>> {
         let env = ProgramEnvironment::from_scope(scope_id);
-        TypeTraversal::with_root(
+        TypeQueryContext::with_root(
             &env,
             TypeExpression {
                 scope_id,
@@ -8782,7 +8804,7 @@ impl<'db> Type<'db> {
         env: &ProgramEnvironment<'db>,
         context: &TypeRecursionContext<'db>,
     ) -> Type<'db> {
-        TypeTraversal::with_recursion_context(
+        TypeQueryContext::with_recursion_context(
             env,
             ProjectMetaType { db, env, context },
             context,
@@ -9894,12 +9916,12 @@ impl<'db> Type<'db> {
     ) -> Option<TypeDefinition<'db>> {
         struct FindDefinition;
 
-        impl<'db> TypeOperation<'db> for FindDefinition {
+        impl<'db> TypeQuery<'db> for FindDefinition {
             type Output = Option<TypeDefinition<'db>>;
 
             fn on_cycle(
                 &self,
-                _traversal: &TypeTraversal<'_, 'db, Self>,
+                _traversal: &TypeQueryContext<'_, 'db, Self>,
                 _ty: Type<'db>,
                 _kind: CycleKind,
                 _state: (),
@@ -9910,7 +9932,7 @@ impl<'db> Type<'db> {
             fn visit(
                 &self,
                 db: &'db dyn Db,
-                traversal: &TypeTraversal<'_, 'db, Self>,
+                traversal: &TypeQueryContext<'_, 'db, Self>,
                 ty: Type<'db>,
                 _state: (),
             ) -> Self::Output {
@@ -10053,7 +10075,7 @@ impl<'db> Type<'db> {
             }
         }
 
-        TypeTraversal::with_root(env, FindDefinition, |traversal| traversal.visit(db, *self))
+        TypeQueryContext::with_root(env, FindDefinition, |traversal| traversal.visit(db, *self))
     }
 
     /// Returns a tuple of two spans. The first is
@@ -10190,12 +10212,12 @@ impl<'db> Type<'db> {
 
 struct ProjectInstance;
 
-impl<'db> TypeOperation<'db> for ProjectInstance {
+impl<'db> TypeQuery<'db> for ProjectInstance {
     type Output = Option<InstanceProjection<Type<'db>>>;
 
     fn on_cycle(
         &self,
-        _traversal: &TypeTraversal<'_, 'db, Self>,
+        _traversal: &TypeQueryContext<'_, 'db, Self>,
         _ty: Type<'db>,
         kind: CycleKind,
         _state: (),
@@ -10209,7 +10231,7 @@ impl<'db> TypeOperation<'db> for ProjectInstance {
     fn visit(
         &self,
         db: &'db dyn Db,
-        traversal: &TypeTraversal<'_, 'db, Self>,
+        traversal: &TypeQueryContext<'_, 'db, Self>,
         ty: Type<'db>,
         _state: (),
     ) -> Self::Output {
@@ -10293,12 +10315,12 @@ struct TypeExpression<'db> {
     inference_flags: InferenceFlags,
 }
 
-impl<'db> TypeOperation<'db> for TypeExpression<'db> {
+impl<'db> TypeQuery<'db> for TypeExpression<'db> {
     type Output = Result<Type<'db>, InvalidTypeExpressionError<'db>>;
 
     fn on_cycle(
         &self,
-        _traversal: &TypeTraversal<'_, 'db, Self>,
+        _traversal: &TypeQueryContext<'_, 'db, Self>,
         _ty: Type<'db>,
         kind: CycleKind,
         _state: (),
@@ -10314,7 +10336,7 @@ impl<'db> TypeOperation<'db> for TypeExpression<'db> {
     fn visit(
         &self,
         db: &'db dyn Db,
-        traversal: &TypeTraversal<'_, 'db, Self>,
+        traversal: &TypeQueryContext<'_, 'db, Self>,
         ty: Type<'db>,
         _state: (),
     ) -> Self::Output {
@@ -10603,12 +10625,12 @@ struct CollectBindings<'a, 'db> {
     recursion_guard: &'a ActiveRecursionDetector<Type<'db>>,
 }
 
-impl<'db> TypeOperation<'db, Option<Type<'db>>> for CollectBindings<'_, 'db> {
+impl<'db> TypeQuery<'db, Option<Type<'db>>> for CollectBindings<'_, 'db> {
     type Output = Option<Bindings<'db>>;
 
     fn on_cycle(
         &self,
-        _traversal: &TypeTraversal<'_, 'db, Self>,
+        _traversal: &TypeQueryContext<'_, 'db, Self, Option<Type<'db>>>,
         ty: Type<'db>,
         kind: CycleKind,
         _receiver: Option<Type<'db>>,
@@ -10622,7 +10644,7 @@ impl<'db> TypeOperation<'db, Option<Type<'db>>> for CollectBindings<'_, 'db> {
     fn visit(
         &self,
         db: &'db dyn Db,
-        traversal: &TypeTraversal<'_, 'db, Self>,
+        traversal: &TypeQueryContext<'_, 'db, Self, Option<Type<'db>>>,
         ty: Type<'db>,
         receiver: Option<Type<'db>>,
     ) -> Self::Output {
@@ -10633,7 +10655,7 @@ impl<'db> TypeOperation<'db, Option<Type<'db>>> for CollectBindings<'_, 'db> {
 impl<'db> CollectBindings<'_, 'db> {
     fn union_bindings(
         db: &'db dyn Db,
-        traversal: &TypeTraversal<'_, 'db, Self>,
+        traversal: &TypeQueryContext<'_, 'db, Self, Option<Type<'db>>>,
         ty: Type<'db>,
         elements: impl Iterator<Item = Type<'db>>,
         receiver: Option<Type<'db>>,
@@ -10652,12 +10674,12 @@ struct ProjectMetaType<'a, 'db> {
     context: &'a TypeRecursionContext<'db>,
 }
 
-impl<'db> TypeOperation<'db> for ProjectMetaType<'_, 'db> {
+impl<'db> TypeQuery<'db> for ProjectMetaType<'_, 'db> {
     type Output = Type<'db>;
 
     fn on_cycle(
         &self,
-        _traversal: &TypeTraversal<'_, 'db, Self>,
+        _traversal: &TypeQueryContext<'_, 'db, Self>,
         _ty: Type<'db>,
         kind: CycleKind,
         _state: (),
@@ -10671,7 +10693,7 @@ impl<'db> TypeOperation<'db> for ProjectMetaType<'_, 'db> {
     fn visit_alias_like(
         &self,
         db: &'db dyn Db,
-        _traversal: &TypeTraversal<'_, 'db, Self>,
+        _traversal: &TypeQueryContext<'_, 'db, Self>,
         ty: Type<'db>,
         state: (),
         project: impl FnOnce(()) -> Type<'db>,
@@ -10708,7 +10730,7 @@ impl<'db> TypeOperation<'db> for ProjectMetaType<'_, 'db> {
     fn visit(
         &self,
         db: &'db dyn Db,
-        traversal: &TypeTraversal<'_, 'db, Self>,
+        traversal: &TypeQueryContext<'_, 'db, Self>,
         ty: Type<'db>,
         _state: (),
     ) -> Type<'db> {
@@ -10843,12 +10865,12 @@ impl<'db> TypeOperation<'db> for ProjectMetaType<'_, 'db> {
 
 struct IsSingleton;
 
-impl<'db> TypeOperation<'db> for IsSingleton {
+impl<'db> TypeQuery<'db> for IsSingleton {
     type Output = bool;
 
     fn on_cycle(
         &self,
-        _traversal: &TypeTraversal<'_, 'db, Self>,
+        _traversal: &TypeQueryContext<'_, 'db, Self>,
         _ty: Type<'db>,
         _kind: CycleKind,
         _state: (),
@@ -10859,7 +10881,7 @@ impl<'db> TypeOperation<'db> for IsSingleton {
     fn visit(
         &self,
         db: &'db dyn Db,
-        traversal: &TypeTraversal<'_, 'db, Self>,
+        traversal: &TypeQueryContext<'_, 'db, Self>,
         ty: Type<'db>,
         _state: (),
     ) -> bool {
@@ -10982,12 +11004,12 @@ impl<'db> TypeOperation<'db> for IsSingleton {
 
 struct InspectGenerator(GeneratorTypeMode);
 
-impl<'db> TypeOperation<'db> for InspectGenerator {
+impl<'db> TypeQuery<'db> for InspectGenerator {
     type Output = Result<Option<GeneratorTypes<'db>>, ()>;
 
     fn on_cycle(
         &self,
-        _traversal: &TypeTraversal<'_, 'db, Self>,
+        _traversal: &TypeQueryContext<'_, 'db, Self>,
         _ty: Type<'db>,
         kind: CycleKind,
         _state: (),
@@ -11001,7 +11023,7 @@ impl<'db> TypeOperation<'db> for InspectGenerator {
     fn visit(
         &self,
         db: &'db dyn Db,
-        traversal: &TypeTraversal<'_, 'db, Self>,
+        traversal: &TypeQueryContext<'_, 'db, Self>,
         ty: Type<'db>,
         _state: (),
     ) -> Self::Output {
@@ -11157,12 +11179,12 @@ impl<'db> TypeOperation<'db> for InspectGenerator {
 
 struct GeneratorAnnotationSendType;
 
-impl<'db> TypeOperation<'db> for GeneratorAnnotationSendType {
+impl<'db> TypeQuery<'db> for GeneratorAnnotationSendType {
     type Output = Option<Type<'db>>;
 
     fn on_cycle(
         &self,
-        _traversal: &TypeTraversal<'_, 'db, Self>,
+        _traversal: &TypeQueryContext<'_, 'db, Self>,
         _ty: Type<'db>,
         _kind: CycleKind,
         _state: (),
@@ -11173,7 +11195,7 @@ impl<'db> TypeOperation<'db> for GeneratorAnnotationSendType {
     fn visit(
         &self,
         db: &'db dyn Db,
-        traversal: &TypeTraversal<'_, 'db, Self>,
+        traversal: &TypeQueryContext<'_, 'db, Self>,
         ty: Type<'db>,
         _state: (),
     ) -> Self::Output {
@@ -11198,12 +11220,12 @@ impl<'db> TypeOperation<'db> for GeneratorAnnotationSendType {
 
 struct IncompatibleYieldFromSendType<'db>(Type<'db>);
 
-impl<'db> TypeOperation<'db> for IncompatibleYieldFromSendType<'db> {
+impl<'db> TypeQuery<'db> for IncompatibleYieldFromSendType<'db> {
     type Output = Option<Type<'db>>;
 
     fn on_cycle(
         &self,
-        _traversal: &TypeTraversal<'_, 'db, Self>,
+        _traversal: &TypeQueryContext<'_, 'db, Self>,
         _ty: Type<'db>,
         _kind: CycleKind,
         _state: (),
@@ -11214,7 +11236,7 @@ impl<'db> TypeOperation<'db> for IncompatibleYieldFromSendType<'db> {
     fn visit(
         &self,
         db: &'db dyn Db,
-        traversal: &TypeTraversal<'_, 'db, Self>,
+        traversal: &TypeQueryContext<'_, 'db, Self>,
         ty: Type<'db>,
         _state: (),
     ) -> Self::Output {

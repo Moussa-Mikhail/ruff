@@ -29,8 +29,8 @@ use crate::place_load::{
 use crate::types::ide_support::{ImportAliasResolution, definition_for_name};
 use crate::types::list_members::{all_members, all_reachable_members};
 use crate::types::{
-    CycleKind, ProgramEnvironment, SpecialFormType, Type, TypeOperation, TypeQualifiers,
-    TypeTraversal, binding_type, infer_complete_scope_types, infer_definition_types,
+    CycleKind, ProgramEnvironment, SpecialFormType, Type, TypeQualifiers, TypeQuery,
+    TypeQueryContext, binding_type, infer_complete_scope_types, infer_definition_types,
     inferred_declaration, is_discarded_dict_key_assignment,
 };
 use ty_python_core::definition::{Definition, DefinitionKind};
@@ -652,12 +652,12 @@ impl<'db> SemanticModel<'db> {
     ) -> Vec<ExpectedStringLiteralCompletion<'db>> {
         struct StringLiteralCandidates;
 
-        impl<'db> TypeOperation<'db> for StringLiteralCandidates {
+        impl<'db> TypeQuery<'db> for StringLiteralCandidates {
             type Output = Vec<ExpectedStringLiteralCompletion<'db>>;
 
             fn on_cycle(
                 &self,
-                _traversal: &TypeTraversal<'_, 'db, Self>,
+                _traversal: &TypeQueryContext<'_, 'db, Self>,
                 _ty: Type<'db>,
                 _kind: CycleKind,
                 _state: (),
@@ -668,7 +668,7 @@ impl<'db> SemanticModel<'db> {
             fn visit(
                 &self,
                 db: &'db dyn Db,
-                traversal: &TypeTraversal<'_, 'db, Self>,
+                traversal: &TypeQueryContext<'_, 'db, Self>,
                 ty: Type<'db>,
                 _state: (),
             ) -> Self::Output {
@@ -702,7 +702,7 @@ impl<'db> SemanticModel<'db> {
         let expected_ty = self.string_literal_completion_expected_type(string_expr);
         let mut candidates = expected_ty
             .map(|expected_ty| {
-                TypeTraversal::with_root(
+                TypeQueryContext::with_root(
                     &self.program_environment(),
                     StringLiteralCandidates,
                     |root| root.visit(db, expected_ty),

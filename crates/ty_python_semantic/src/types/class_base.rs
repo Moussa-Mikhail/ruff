@@ -10,7 +10,7 @@ use crate::types::tuple::TupleType;
 use crate::types::{
     ApplyTypeMappingVisitor, ClassLiteral, ClassType, CycleKind, DivergentType, DynamicType,
     KnownClass, KnownInstanceType, MaterializationKind, SpecialFormType, StaticMroError, Type,
-    TypeContext, TypeMapping, TypeOperation, TypeTraversal, TypingModule, todo_type,
+    TypeContext, TypeMapping, TypeQuery, TypeQueryContext, TypingModule, todo_type,
 };
 use crate::{Db, DisplaySettings};
 
@@ -148,7 +148,7 @@ impl<'db> ClassBase<'db> {
         ty: Type<'db>,
         subclass: Option<ClassLiteral<'db>>,
     ) -> Option<Self> {
-        TypeTraversal::with_root(env, ResolveClassBase { subclass }, |root| {
+        TypeQueryContext::with_root(env, ResolveClassBase { subclass }, |root| {
             root.visit(db, ty)
         })
     }
@@ -332,12 +332,12 @@ struct ResolveClassBase<'db> {
     subclass: Option<ClassLiteral<'db>>,
 }
 
-impl<'db> TypeOperation<'db> for ResolveClassBase<'db> {
+impl<'db> TypeQuery<'db> for ResolveClassBase<'db> {
     type Output = Option<ClassBase<'db>>;
 
     fn on_cycle(
         &self,
-        _traversal: &TypeTraversal<'_, 'db, Self>,
+        _traversal: &TypeQueryContext<'_, 'db, Self>,
         _ty: Type<'db>,
         _kind: CycleKind,
         _state: (),
@@ -348,7 +348,7 @@ impl<'db> TypeOperation<'db> for ResolveClassBase<'db> {
     fn visit(
         &self,
         db: &'db dyn Db,
-        traversal: &TypeTraversal<'_, 'db, Self>,
+        traversal: &TypeQueryContext<'_, 'db, Self>,
         ty: Type<'db>,
         _state: (),
     ) -> Self::Output {

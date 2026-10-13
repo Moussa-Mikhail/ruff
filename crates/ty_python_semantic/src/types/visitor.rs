@@ -12,8 +12,7 @@ use crate::types::{
     CycleKind, EnumComplementType, GenericAlias, IntersectionType, KnownBoundMethodType,
     KnownInstanceType, NominalInstanceType, PropertyInstanceType, ProtocolInstanceType,
     RecursiveType, SlotDescriptorType, StaticClassLiteral, SubclassOfType, Type, TypeAliasType,
-    TypeFormType, TypeGuardType, TypeIsType, TypeOperation, TypeTraversal, TypedDictType,
-    UnionType,
+    TypeFormType, TypeGuardType, TypeIsType, TypeTraversal, TypeWalk, TypedDictType, UnionType,
     bound_super::walk_bound_super_type,
     callable::walk_callable_type,
     class::walk_generic_alias,
@@ -153,7 +152,7 @@ pub(crate) trait TypeVisitor<'db> {
 
 struct VisitRecursiveBody;
 
-impl<'db, V: TypeVisitor<'db> + ?Sized> TypeOperation<'db, &V> for VisitRecursiveBody {
+impl<'db, V: TypeVisitor<'db> + ?Sized> TypeWalk<'db, &V> for VisitRecursiveBody {
     type Output = ();
 
     fn on_cycle(

@@ -41,8 +41,8 @@ use crate::types::{
     ApplyTypeMappingVisitor, BindingContext, BoundTypeVarInstance, CallableType, CallableTypes,
     ClassLiteral, CycleKind, ErrorContext, FindLegacyTypeVarsVisitor, IntersectionType, KnownClass,
     KnownInstanceType, MaterializationKind, RecursiveType, SubclassOfInner, Type, TypeAliasType,
-    TypeContext, TypeMapping, TypeOperation, TypeTraversal, TypeVarBoundOrConstraints, TypeVarKind,
-    TypeVarVariance, UnionAccumulator, UnionType, binding_type, infer_definition_types,
+    TypeContext, TypeMapping, TypeTraversal, TypeVarBoundOrConstraints, TypeVarKind,
+    TypeVarVariance, TypeWalk, UnionAccumulator, UnionType, binding_type, infer_definition_types,
     inferred_declaration,
 };
 use crate::{Db, FxIndexMap, FxOrderMap, FxOrderSet};
@@ -3732,7 +3732,7 @@ impl<'db, 'c> SpecializationBuilder<'db, 'c> {
 
         struct CollectMappingUnionTypes;
 
-        impl<'a, 'db> TypeOperation<'db, &'a mut MappingUnionTypes<'db>> for CollectMappingUnionTypes {
+        impl<'a, 'db> TypeWalk<'db, &'a mut MappingUnionTypes<'db>> for CollectMappingUnionTypes {
             type Output = bool;
 
             fn on_cycle(

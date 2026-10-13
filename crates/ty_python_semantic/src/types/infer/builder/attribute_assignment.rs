@@ -19,7 +19,7 @@ use crate::types::diagnostic::{
     report_bad_dunder_set_call, report_invalid_attribute_assignment,
     report_possibly_missing_attribute,
 };
-use crate::types::recursive::{TypeOperation, TypeTraversal};
+use crate::types::recursive::{TypeTraversal, TypeWalk};
 use crate::types::{
     CallDunderError, DisplaySettings, MemberLookupPolicy, PropertyDeprecations, Type, TypeContext,
     TypeQualifiers,
@@ -1178,7 +1178,7 @@ struct DescriptorWrite<'db> {
     emit_diagnostics: bool,
 }
 
-impl<'db> TypeOperation<'db, &mut AssignmentAttributeWriteEvaluator<'_, 'db, '_, '_>>
+impl<'db> TypeWalk<'db, &mut AssignmentAttributeWriteEvaluator<'_, 'db, '_, '_>>
     for DescriptorWrite<'db>
 {
     type Output = bool;

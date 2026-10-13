@@ -3409,6 +3409,18 @@ def _(a_and_b: Intersection[A, B], b_and_a: Intersection[B, A]):
     reveal_type(b_and_a.desc)  # revealed: B & A
 ```
 
+The same descriptor can be reached with different intersection receivers in one union. Each
+alternative retains its own receiver:
+
+```py
+from typing import assert_type
+
+class C: ...
+
+def different_receivers(value: Intersection[A, B] | Intersection[A, C]):
+    assert_type(value.desc, Intersection[A, B] | Intersection[A, C])
+```
+
 ### Negation types
 
 Make sure that attributes accessible on `object` are also accessible on a negation type like `~P`,

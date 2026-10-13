@@ -9,7 +9,7 @@
 
 use crate::Db;
 use crate::types::recursive::TypeInspector;
-use crate::types::{CycleKind, TypeOperation, TypeTraversal};
+use crate::types::{CycleKind, TypeTraversal, TypeWalk};
 use ty_module_resolver::KnownModule;
 use ty_python_core::{definition::Definition, use_def_map};
 
@@ -312,7 +312,7 @@ impl<'env, 'db> AttributeWriteResolver<'env, 'db> {
     }
 }
 
-impl<'db, R, F> TypeOperation<'db, F> for ResolveAttributeWrite<'_>
+impl<'db, R, F> TypeWalk<'db, F> for ResolveAttributeWrite<'_>
 where
     F: FnOnce(Option<AttributeWriteRequirement<'db>>) -> R,
 {
@@ -1684,7 +1684,7 @@ struct CheckDescriptorWrite<'db> {
     value_ty: Type<'db>,
 }
 
-impl<'c, 'db> TypeOperation<'db, &TypeRelationChecker<'_, 'c, 'db>> for CheckDescriptorWrite<'db> {
+impl<'c, 'db> TypeWalk<'db, &TypeRelationChecker<'_, 'c, 'db>> for CheckDescriptorWrite<'db> {
     type Output = ConstraintSet<'db, 'c>;
 
     fn on_cycle(

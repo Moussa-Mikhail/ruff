@@ -22,7 +22,7 @@ use ty_python_core::{ProgramFile, semantic_index};
 use ty_python_semantic::HasType;
 use ty_python_semantic::importer::{ImportRequest, Importer};
 use ty_python_semantic::types::{
-    CycleKind, SpecialFormType, TypeOperation, TypeTraversal, UnionType,
+    CycleKind, SpecialFormType, TypeQuery, TypeQueryContext, UnionType,
 };
 use ty_python_semantic::{
     Completion as SemanticCompletion, NameKind, SemanticModel,
@@ -3311,17 +3311,17 @@ fn completion_kind_from_type<'db>(
     env: &ProgramEnvironment<'db>,
     ty: Type<'db>,
 ) -> Option<CompletionKind> {
-    TypeTraversal::with_root(env, FindCompletionKind, |root| root.visit(db, ty))
+    TypeQueryContext::with_root(env, FindCompletionKind, |root| root.visit(db, ty))
 }
 
 struct FindCompletionKind;
 
-impl<'db> TypeOperation<'db> for FindCompletionKind {
+impl<'db> TypeQuery<'db> for FindCompletionKind {
     type Output = Option<CompletionKind>;
 
     fn on_cycle(
         &self,
-        _traversal: &TypeTraversal<'_, 'db, Self>,
+        _traversal: &TypeQueryContext<'_, 'db, Self>,
         _ty: Type<'db>,
         _kind: CycleKind,
         _state: (),
@@ -3332,7 +3332,7 @@ impl<'db> TypeOperation<'db> for FindCompletionKind {
     fn visit(
         &self,
         db: &'db dyn SemanticDb,
-        traversal: &TypeTraversal<'_, 'db, Self>,
+        traversal: &TypeQueryContext<'_, 'db, Self>,
         ty: Type<'db>,
         _state: (),
     ) -> Self::Output {

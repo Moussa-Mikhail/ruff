@@ -22,8 +22,8 @@ use crate::types::tuple::TupleType;
 use crate::types::visitor::any_over_type;
 use crate::types::{
     CallableType, ClassBase, ClassLiteral, CycleKind, EnumLiteralType, IntersectionBuilder,
-    KnownClass, Parameter, Parameters, Signature, SpecialFormType, Type, TypeContext,
-    TypeOperation, TypeTraversal, TypeVarBoundOrConstraints, TypedDictType, UnionType,
+    KnownClass, Parameter, Parameters, Signature, SpecialFormType, Type, TypeContext, TypeQuery,
+    TypeQueryContext, TypeTraversal, TypeVarBoundOrConstraints, TypeWalk, TypedDictType, UnionType,
     binding_type, equality_truthiness, infer_same_file_expression_type,
 };
 
@@ -123,7 +123,7 @@ fn typed_dict_pattern_domain_satisfies<'db>(
 
 struct TypedDictPatternDomain;
 
-impl<'a, 'db, F> TypeOperation<'db, &'a mut F> for TypedDictPatternDomain
+impl<'a, 'db, F> TypeWalk<'db, &'a mut F> for TypedDictPatternDomain
 where
     F: FnMut(TypedDictType<'db>) -> bool,
 {
@@ -799,7 +799,7 @@ fn definite_match_pattern_type_for_subject_cached<'pattern, 'db>(
 /// finite nested pattern can inspect successive occurrences of the same recursive type.
 struct DefinitePattern<'pattern, 'db>(&'pattern PatternPredicateKind<'db>);
 
-impl<'a, 'pattern, 'db> TypeOperation<'db, (&'a mut PatternTypeCache<'pattern, 'db>, Type<'db>)>
+impl<'a, 'pattern, 'db> TypeWalk<'db, (&'a mut PatternTypeCache<'pattern, 'db>, Type<'db>)>
     for DefinitePattern<'pattern, 'db>
 {
     type Output = Type<'db>;
@@ -1119,7 +1119,7 @@ fn try_sequence_pattern_binding_fallthrough_type<'db>(
 
 struct SequencePatternFallthrough<'pattern, 'db>(&'pattern SequencePatternPredicateKind<'db>);
 
-impl<'a, 'db> TypeOperation<'db, (&'a mut ExactTuplePatternExpansionBudget, Type<'db>)>
+impl<'a, 'db> TypeWalk<'db, (&'a mut ExactTuplePatternExpansionBudget, Type<'db>)>
     for SequencePatternFallthrough<'_, 'db>
 {
     type Output = Result<Type<'db>, ()>;
@@ -1297,17 +1297,17 @@ fn is_same_enum_pattern_domain<'db>(
     ty: Type<'db>,
     right: EnumLiteralType<'db>,
 ) -> bool {
-    TypeTraversal::with_root(env, EnumPatternDomain(right), |root| root.visit(db, ty))
+    TypeQueryContext::with_root(env, EnumPatternDomain(right), |root| root.visit(db, ty))
 }
 
 struct EnumPatternDomain<'db>(EnumLiteralType<'db>);
 
-impl<'db> TypeOperation<'db> for EnumPatternDomain<'db> {
+impl<'db> TypeQuery<'db> for EnumPatternDomain<'db> {
     type Output = bool;
 
     fn on_cycle(
         &self,
-        _traversal: &TypeTraversal<'_, 'db, Self>,
+        _traversal: &TypeQueryContext<'_, 'db, Self>,
         _ty: Type<'db>,
         kind: CycleKind,
         _state: (),
@@ -1318,7 +1318,7 @@ impl<'db> TypeOperation<'db> for EnumPatternDomain<'db> {
     fn visit(
         &self,
         db: &'db dyn Db,
-        traversal: &TypeTraversal<'_, 'db, Self>,
+        traversal: &TypeQueryContext<'_, 'db, Self>,
         ty: Type<'db>,
         _state: (),
     ) -> bool {

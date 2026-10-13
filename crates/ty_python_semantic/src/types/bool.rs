@@ -6,8 +6,8 @@ use ruff_text_size::{Ranged, TextRange};
 
 use crate::types::{
     CallArguments, CallDunderError, ClassType, CycleKind, KnownClass, KnownInstanceType,
-    LiteralValueTypeKind, PropertyInstanceClass, SubclassOfInner, Type, TypeContext, TypeOperation,
-    TypeTraversal, TypeVarBoundOrConstraints, UnionType, call::CallErrorKind,
+    LiteralValueTypeKind, PropertyInstanceClass, SubclassOfInner, Type, TypeContext, TypeQuery,
+    TypeQueryContext, TypeVarBoundOrConstraints, UnionType, call::CallErrorKind,
     constraints::ConstraintSetBuilder, context::InferContext,
     diagnostic::UNSUPPORTED_BOOL_CONVERSION, typed_dict::TypedDictField,
 };
@@ -24,7 +24,7 @@ impl<'db> Type<'db> {
     /// This describes the value type; a compound expression can also fail to complete because
     /// of its operands, even when its inferred result type is inhabited.
     pub(crate) fn bool(&self, db: &'db dyn Db, env: &ProgramEnvironment<'db>) -> Truthiness {
-        TypeTraversal::with_root(
+        TypeQueryContext::with_root(
             env,
             TryBool {
                 allow_short_circuit: true,
@@ -45,7 +45,7 @@ impl<'db> Type<'db> {
         db: &'db dyn Db,
         env: &ProgramEnvironment<'db>,
     ) -> Result<Truthiness, BoolError<'db>> {
-        TypeTraversal::with_root(
+        TypeQueryContext::with_root(
             env,
             TryBool {
                 allow_short_circuit: false,
@@ -59,12 +59,12 @@ struct TryBool {
     allow_short_circuit: bool,
 }
 
-impl<'db> TypeOperation<'db> for TryBool {
+impl<'db> TypeQuery<'db> for TryBool {
     type Output = Result<Truthiness, BoolError<'db>>;
 
     fn on_cycle(
         &self,
-        _traversal: &TypeTraversal<'_, 'db, Self>,
+        _traversal: &TypeQueryContext<'_, 'db, Self>,
         _ty: Type<'db>,
         kind: CycleKind,
         _state: (),
@@ -91,7 +91,7 @@ impl<'db> TypeOperation<'db> for TryBool {
     fn visit(
         &self,
         db: &'db dyn Db,
-        traversal: &TypeTraversal<'_, 'db, Self>,
+        traversal: &TypeQueryContext<'_, 'db, Self>,
         ty: Type<'db>,
         _state: (),
     ) -> Self::Output {

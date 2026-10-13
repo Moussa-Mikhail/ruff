@@ -66,16 +66,18 @@
 //! before inspecting the values. These projections have no source alias name; ordinary union
 //! construction and type display expand their completed bodies.
 
-use std::cell::OnceCell;
+use std::cell::{Cell, OnceCell, RefCell};
 use std::hash::Hash;
 
+use rustc_hash::FxHashSet;
 use salsa::plumbing::AsId;
 use ty_python_core::definition::Definition;
 use ty_python_core::place_table;
 
 use super::constraints::{ConstraintSet, IteratorConstraintsExtension};
 use super::cyclic::{
-    ActiveRecursionDetector, CycleDetector, CycleKind, HasIdentity, TypeTransformer,
+    ActiveRecursionDetector, CycleDetector, CycleDetectorCache, CycleKind, HasIdentity,
+    TypeTransformer,
 };
 use super::generics::{ApplySpecialization, Specialization};
 use super::relation::{TypeRelation, TypeRelationChecker};
@@ -238,14 +240,15 @@ where
     }
 }
 
-/// An operation on the outer shape of a type.
+/// A walk that observes type structure or borrows mutable state.
 ///
 /// [`TypeTraversal`] expands aliases and recursive types before calling [`Self::visit`].
 /// A recursive reference whose body is still unavailable is passed through unchanged.
 /// Implementations select which other children to inspect by calling the traversal's `visit`
 /// method. They never unfold recursive bodies or manage the active recursion stack themselves.
 /// `State` passes per-visit inputs, including mutable builders, without storing them in the traversal.
-pub trait TypeOperation<'db, State = ()>: Sized {
+/// Repeated occurrences are visited independently; use [`TypeQuery`] for reusable semantic results.
+pub trait TypeWalk<'db, State = ()>: Sized {
     type Output;
 
     fn visit(
@@ -302,7 +305,8 @@ struct TypeTraversalTag;
 ///
 /// A recursive body can expose a union that contains the same recursive type again. The guard
 /// therefore covers both unfolding and the operation's subsequent traversal of that body.
-/// Completed results are not cached: a result reached through a cycle can depend on its parents.
+/// This is a walk: callbacks can mutate builders or collect occurrences. Use [`TypeQueryContext`]
+/// for operations that compute a reusable result from a type and immutable input.
 pub struct TypeTraversal<'env, 'db, O> {
     operation: O,
     env: &'env ProgramEnvironment<'db>,
@@ -356,15 +360,6 @@ impl<'env, 'db, O> TypeTraversal<'env, 'db, O> {
         }
     }
 
-    pub(super) fn with_recursion_context<R>(
-        env: &'env ProgramEnvironment<'db>,
-        operation: O,
-        context: &'env TypeRecursionContext<'db>,
-        visit: impl FnOnce(&Self) -> R,
-    ) -> R {
-        visit(&Self::new_with_recursion_context(env, operation, context))
-    }
-
     /// Start a traversal inside a transformation without replacing that transformation's guards.
     fn from_mapping_visitor(
         visitor: &'env ApplyTypeMappingVisitor<'env, 'db>,
@@ -389,7 +384,7 @@ impl<'env, 'db, O> TypeTraversal<'env, 'db, O> {
 
     pub fn visit(&self, db: &'db dyn Db, ty: Type<'db>) -> O::Output
     where
-        O: TypeOperation<'db>,
+        O: TypeWalk<'db>,
     {
         self.visit_with(db, ty, ())
     }
@@ -402,18 +397,9 @@ impl<'env, 'db, O> TypeTraversal<'env, 'db, O> {
         state: State,
     ) -> O::Output
     where
-        O: TypeOperation<'db, State>,
+        O: TypeWalk<'db, State>,
     {
-        // These outer-shape walks recurse through deferred definitions, bounds, and newtype
-        // bases. Guard those boundaries so a cycle result retains the reference to its definition.
-        // Revisiting a concrete type during builder normalization is not a recursive unfolding.
-        if !matches!(
-            ty,
-            Type::TypeAlias(_) | Type::Recursive(_) | Type::TypeVar(_) | Type::NewTypeInstance(_)
-        ) {
-            return self.operation.visit(db, self, ty, state);
-        }
-        self.active.visit_active(db, ty, |cycle| {
+        self.with_active_type(db, ty, |cycle| {
             if let Some(kind) = cycle {
                 return self.operation.on_cycle(self, ty, kind, state);
             }
@@ -445,6 +431,249 @@ impl<'env, 'db, O> TypeTraversal<'env, 'db, O> {
             }
         })
     }
+
+    fn with_active_type<R>(
+        &self,
+        db: &'db dyn Db,
+        ty: Type<'db>,
+        visit: impl FnOnce(Option<CycleKind>) -> R,
+    ) -> R {
+        // These outer-shape operations recurse through deferred definitions, bounds, and newtype
+        // bases. Revisiting a concrete type during normalization is not a recursive unfolding.
+        if needs_traversal_guard(ty) {
+            self.active.visit_active(db, ty, visit)
+        } else {
+            visit(None)
+        }
+    }
+}
+
+fn needs_traversal_guard(ty: Type<'_>) -> bool {
+    matches!(
+        ty,
+        Type::TypeAlias(_) | Type::Recursive(_) | Type::TypeVar(_) | Type::NewTypeInstance(_)
+    )
+}
+
+/// A query of a type's outer alternatives, with immutable operation-specific input.
+///
+/// The context unfolds aliases, expands outer unions, and memoizes recursive queries. A query
+/// must return the same result for the same type and input under the same recursion guards.
+/// Parameters shared by all recursive calls, such as an attribute name, belong on `Self`.
+/// Parameters that change between calls, such as a descriptor's receiver, belong in `Input`.
+/// Use [`TypeWalk`] for callbacks or walks that mutate a collector or builder instead.
+pub trait TypeQuery<'db, Input = ()>: Sized
+where
+    Input: Clone + Eq + Hash,
+{
+    type Output: Clone;
+
+    fn visit(
+        &self,
+        db: &'db dyn Db,
+        context: &TypeQueryContext<'_, 'db, Self, Input>,
+        ty: Type<'db>,
+        input: Input,
+    ) -> Self::Output;
+
+    fn on_cycle(
+        &self,
+        context: &TypeQueryContext<'_, 'db, Self, Input>,
+        ty: Type<'db>,
+        kind: CycleKind,
+        input: Input,
+    ) -> Self::Output;
+
+    /// Keep guards shared with other operations active while inspecting an alias body.
+    fn visit_alias_like(
+        &self,
+        _db: &'db dyn Db,
+        _context: &TypeQueryContext<'_, 'db, Self, Input>,
+        _ty: Type<'db>,
+        input: Input,
+        visit_body: impl FnOnce(Input) -> Self::Output,
+    ) -> Self::Output {
+        visit_body(input)
+    }
+}
+
+type TypeQueryCache<'db, Input, R> =
+    CycleDetectorCache<(Type<'db>, Input), TypeQueryResult<'db, R>>;
+
+/// Shares completed queries as well as recursion and materialization state.
+///
+/// A cycle result can depend on the enclosing types. Each cached answer therefore records the
+/// guards consulted by its computation. Reuse requires those guards to give the same answers
+/// in the current context, including guards reached through another cached query.
+/// Changes to guards shared with other operations invalidate the cache as well.
+pub struct TypeQueryContext<'env, 'db, Q, Input = ()>
+where
+    Q: TypeQuery<'db, Input>,
+    Input: Clone + Eq + Hash,
+{
+    traversal: TypeTraversal<'env, 'db, Q>,
+    cache: RefCell<TypeQueryCache<'db, Input, Q::Output>>,
+    recursion_revision: Cell<Option<[u64; 3]>>,
+    dependencies: RefCell<Vec<Type<'db>>>,
+    depth: Cell<usize>,
+}
+
+impl<'env, 'db, Q, Input> TypeQueryContext<'env, 'db, Q, Input>
+where
+    Q: TypeQuery<'db, Input>,
+    Input: Clone + Eq + Hash,
+{
+    fn new(traversal: TypeTraversal<'env, 'db, Q>) -> Self {
+        Self {
+            traversal,
+            cache: RefCell::new(CycleDetectorCache::new()),
+            recursion_revision: Cell::new(None),
+            dependencies: RefCell::default(),
+            depth: Cell::new(0),
+        }
+    }
+
+    /// Run a query with one cache and one set of guards for all recursive calls.
+    pub fn with_root<R>(
+        env: &'env ProgramEnvironment<'db>,
+        query: Q,
+        visit: impl FnOnce(&Self) -> R,
+    ) -> R {
+        visit(&Self::new(TypeTraversal::new(env, query)))
+    }
+
+    pub(super) fn with_recursion_context<R>(
+        env: &'env ProgramEnvironment<'db>,
+        query: Q,
+        context: &'env TypeRecursionContext<'db>,
+        visit: impl FnOnce(&Self) -> R,
+    ) -> R {
+        visit(&Self::new(TypeTraversal::new_with_recursion_context(
+            env, query, context,
+        )))
+    }
+
+    pub(crate) fn environment(&self) -> &ProgramEnvironment<'db> {
+        self.traversal.environment()
+    }
+
+    pub(super) fn mapping_visitor(&self) -> &ApplyTypeMappingVisitor<'env, 'db> {
+        self.traversal.mapping_visitor()
+    }
+
+    pub(crate) fn visit_with(&self, db: &'db dyn Db, ty: Type<'db>, input: Input) -> Q::Output {
+        self.depth.set(self.depth.get() + 1);
+        let _frame = TypeQueryFrame {
+            depth: &self.depth,
+            dependencies: &self.dependencies,
+        };
+        self.validate_recursion_context();
+        let key = (ty, input.clone());
+        if let Some(cached) = self.cache.borrow().get(&key)
+            && cached.dependencies.iter().all(|(dependency, expected)| {
+                self.traversal.active.cycle_kind(db, dependency) == *expected
+            })
+        {
+            self.dependencies
+                .borrow_mut()
+                .extend(cached.dependencies.iter().map(|(ty, _)| *ty));
+            return cached.output.clone();
+        }
+
+        let start = self.dependencies.borrow().len();
+        if needs_traversal_guard(ty) {
+            self.dependencies.borrow_mut().push(ty);
+        }
+        let output = self.traversal.with_active_type(db, ty, |cycle| {
+            let query = &self.traversal.operation;
+            if let Some(kind) = cycle {
+                return query.on_cycle(self, ty, kind, input);
+            }
+            match ty {
+                Type::TypeAlias(alias) => query.visit_alias_like(db, self, ty, input, |input| {
+                    self.visit_with(
+                        db,
+                        alias.value_type_with_recursion(db, self.traversal.recursion_context),
+                        input,
+                    )
+                }),
+                Type::Recursive(recursive) => {
+                    query.visit_alias_like(db, self, ty, input, |input| {
+                        match recursive.unfold(db, self.mapping_visitor()) {
+                            UnfoldResult::Unfolded(body) => self.visit_with(db, body, input),
+                            UnfoldResult::Unchanged(_) => query.visit(db, self, ty, input),
+                        }
+                    })
+                }
+                Type::Union(union) if union.needs_alias_expansion(db, self.mapping_visitor()) => {
+                    let expanded = union.expand_aliases(db, self.mapping_visitor());
+                    if expanded == ty {
+                        query.visit(db, self, ty, input)
+                    } else {
+                        self.visit_with(db, expanded, input)
+                    }
+                }
+                _ => query.visit(db, self, ty, input),
+            }
+        });
+
+        // Nested queries contribute their complete dependency sets, even on a cache hit. Check
+        // those dependencies after leaving this query's guards, when the enclosing stack is the
+        // same as it was on entry. In A -> B -> A, B's result cannot escape its dependency on A.
+        let dependencies: FxHashSet<_> = self.dependencies.borrow_mut().drain(start..).collect();
+        self.dependencies.borrow_mut().extend(&dependencies);
+        let dependencies = dependencies
+            .into_iter()
+            .map(|ty| (ty, self.traversal.active.cycle_kind(db, &ty)))
+            .collect();
+        self.validate_recursion_context();
+        self.cache.borrow_mut().insert(
+            key,
+            TypeQueryResult {
+                output: output.clone(),
+                dependencies,
+            },
+        );
+        output
+    }
+
+    fn validate_recursion_context(&self) {
+        let revision = self
+            .traversal
+            .recursion_context
+            .map(TypeRecursionContext::revision);
+        if self.recursion_revision.replace(revision) != revision {
+            // Shared guards can change in a nested projection or specialization without entering
+            // this query's local traversal. Discard answers computed under the previous context.
+            *self.cache.borrow_mut() = CycleDetectorCache::new();
+        }
+    }
+}
+
+impl<'db, Q: TypeQuery<'db>> TypeQueryContext<'_, 'db, Q> {
+    pub fn visit(&self, db: &'db dyn Db, ty: Type<'db>) -> Q::Output {
+        self.visit_with(db, ty, ())
+    }
+}
+
+struct TypeQueryResult<'db, R> {
+    output: R,
+    dependencies: Box<[(Type<'db>, Option<CycleKind>)]>,
+}
+
+/// The dependency log belongs to active queries; completed roots retain only their cache entries.
+struct TypeQueryFrame<'a, 'db> {
+    depth: &'a Cell<usize>,
+    dependencies: &'a RefCell<Vec<Type<'db>>>,
+}
+
+impl Drop for TypeQueryFrame<'_, '_> {
+    fn drop(&mut self) {
+        self.depth.set(self.depth.get() - 1);
+        if self.depth.get() == 0 {
+            self.dependencies.borrow_mut().clear();
+        }
+    }
 }
 
 enum TraversalMapping<'env, 'db> {
@@ -457,7 +686,7 @@ pub(super) struct InspectType;
 
 pub(super) type TypeInspector<'env, 'db> = TypeTraversal<'env, 'db, InspectType>;
 
-impl<'db, R, C, F> TypeOperation<'db, (C, F)> for InspectType
+impl<'db, R, C, F> TypeWalk<'db, (C, F)> for InspectType
 where
     C: FnOnce(Type<'db>, CycleKind) -> R,
     F: FnOnce(&TypeInspector<'_, 'db>, Type<'db>) -> R,
@@ -1249,5 +1478,207 @@ impl Type<'_> {
             !matches!(self, Self::RecursiveVar(_)),
             "semantic operation on an unbound recursive variable"
         );
+    }
+}
+
+#[cfg(test)]
+mod query_tests {
+    use std::cell::RefCell;
+
+    use ruff_python_ast::name::Name;
+    use rustc_hash::FxHashMap;
+
+    use super::{CycleKind, TypeQuery, TypeQueryContext};
+    use crate::Db;
+    use crate::db::tests::setup_db;
+    use crate::types::{BoundTypeVarInstance, Type, TypeRecursionContext, TypeVarVariance};
+
+    struct SumGraph<'db> {
+        edges: FxHashMap<Type<'db>, Vec<Type<'db>>>,
+        visits: RefCell<FxHashMap<(Type<'db>, u64), usize>>,
+    }
+
+    impl<'db> TypeQuery<'db, u64> for SumGraph<'db> {
+        type Output = u64;
+
+        fn visit(
+            &self,
+            db: &'db dyn Db,
+            context: &TypeQueryContext<'_, 'db, Self, u64>,
+            ty: Type<'db>,
+            value: u64,
+        ) -> u64 {
+            *self.visits.borrow_mut().entry((ty, value)).or_default() += 1;
+            value
+                + self
+                    .edges
+                    .get(&ty)
+                    .into_iter()
+                    .flatten()
+                    .map(|child| context.visit_with(db, *child, value))
+                    .sum::<u64>()
+        }
+
+        fn on_cycle(
+            &self,
+            _context: &TypeQueryContext<'_, 'db, Self, u64>,
+            _ty: Type<'db>,
+            _kind: CycleKind,
+            _value: u64,
+        ) -> u64 {
+            0
+        }
+    }
+
+    #[test]
+    fn shared_queries_are_evaluated_once_per_input() {
+        let db = setup_db();
+        let env = db.program_environment();
+        let mut edges = FxHashMap::default();
+        let mut previous = [Type::int_literal(0), Type::int_literal(1)];
+        // Each pair shares both nodes from the preceding level. Walking every path would take
+        // millions of visits, although this graph contains only fifty distinct queries.
+        for level in 1..=24 {
+            let pair = [
+                Type::int_literal(2 * level),
+                Type::int_literal(2 * level + 1),
+            ];
+            for ty in pair {
+                edges.insert(ty, previous.to_vec());
+            }
+            previous = pair;
+        }
+        TypeQueryContext::with_root(
+            &env,
+            SumGraph {
+                edges,
+                visits: RefCell::default(),
+            },
+            |context| {
+                for value in [1, 2] {
+                    for root in previous {
+                        assert_eq!(
+                            context.visit_with(&db, root, value),
+                            ((1 << 25) - 1) * value,
+                        );
+                    }
+                }
+                let visits = context.traversal.operation.visits.borrow();
+                assert_eq!(visits.len(), 100);
+                assert!(visits.values().all(|count| *count == 1));
+            },
+        );
+    }
+
+    #[test]
+    fn cycle_dependent_answers_are_recomputed_outside_the_cycle() {
+        let db = setup_db();
+        let env = db.program_environment();
+        let [a, b] = ["A", "B"].map(|name| {
+            Type::TypeVar(BoundTypeVarInstance::synthetic(
+                &db,
+                &env,
+                Name::new(name),
+                TypeVarVariance::Invariant,
+            ))
+        });
+        TypeQueryContext::with_root(
+            &env,
+            SumGraph {
+                edges: [(a, vec![b, Type::int_literal(0)]), (b, vec![a])]
+                    .into_iter()
+                    .collect(),
+                visits: RefCell::default(),
+            },
+            |context| {
+                // B contributes only itself while A is active. That partial answer cannot be
+                // reused when B becomes the root and can reach A and the literal as well.
+                assert_eq!(context.visit_with(&db, a, 1), 3);
+                assert_eq!(context.visit_with(&db, b, 1), 3);
+                assert_eq!(context.visit_with(&db, a, 1), 3);
+            },
+        );
+    }
+
+    #[test]
+    fn cached_dependencies_survive_cache_hits_and_new_enclosing_guards() {
+        let db = setup_db();
+        let env = db.program_environment();
+        let [a, b] = ["A", "B"].map(|name| {
+            Type::TypeVar(BoundTypeVarInstance::synthetic(
+                &db,
+                &env,
+                Name::new(name),
+                TypeVarVariance::Invariant,
+            ))
+        });
+        let c = Type::int_literal(0);
+        TypeQueryContext::with_root(
+            &env,
+            SumGraph {
+                edges: [(c, vec![b]), (b, vec![a])].into_iter().collect(),
+                visits: RefCell::default(),
+            },
+            |context| {
+                assert_eq!(context.visit_with(&db, b, 1), 2);
+                assert_eq!(context.visit_with(&db, c, 1), 3);
+                // C reused B's answer, but still depends on being able to enter A. Even though
+                // that computation encountered no cycle, it is invalid while A is active.
+                context.traversal.with_active_type(&db, a, |cycle| {
+                    assert_eq!(cycle, None);
+                    assert_eq!(context.visit_with(&db, c, 1), 2);
+                });
+                assert_eq!(context.visit_with(&db, c, 1), 3);
+            },
+        );
+    }
+
+    #[test]
+    fn shared_guard_changes_invalidate_completed_queries() {
+        struct HasSharedGuard<'a, 'db>(&'a TypeRecursionContext<'db>);
+
+        impl<'db> TypeQuery<'db> for HasSharedGuard<'_, 'db> {
+            type Output = bool;
+
+            fn visit(
+                &self,
+                _db: &'db dyn Db,
+                _context: &TypeQueryContext<'_, 'db, Self>,
+                _ty: Type<'db>,
+                (): (),
+            ) -> bool {
+                self.0.meta_type.is_active()
+            }
+
+            fn on_cycle(
+                &self,
+                _context: &TypeQueryContext<'_, 'db, Self>,
+                _ty: Type<'db>,
+                _kind: CycleKind,
+                (): (),
+            ) -> bool {
+                false
+            }
+        }
+
+        let db = setup_db();
+        let env = db.program_environment();
+        let shared = TypeRecursionContext::default();
+        let typevar = BoundTypeVarInstance::synthetic(
+            &db,
+            &env,
+            Name::new_static("T"),
+            TypeVarVariance::Invariant,
+        );
+        let key = (env.program(&db), typevar.identity(&db));
+        TypeQueryContext::with_recursion_context(&env, HasSharedGuard(&shared), &shared, |query| {
+            let ty = Type::int_literal(0);
+            assert!(!query.visit(&db, ty));
+            shared
+                .meta_type
+                .typevars
+                .visit(&key, || (), || assert!(query.visit(&db, ty)));
+            assert!(!query.visit(&db, ty));
+        });
     }
 }

@@ -1,6 +1,6 @@
 use crate::Db;
 use crate::ProgramEnvironment;
-use crate::types::{CycleKind, TypeOperation, TypeTraversal};
+use crate::types::{CycleKind, TypeQuery, TypeQueryContext};
 use crate::{
     FxOrderSet, Program,
     types::{
@@ -16,12 +16,12 @@ struct CanSuppressExceptions {
     is_async: bool,
 }
 
-impl<'db> TypeOperation<'db> for CanSuppressExceptions {
+impl<'db> TypeQuery<'db> for CanSuppressExceptions {
     type Output = bool;
 
     fn on_cycle(
         &self,
-        _traversal: &TypeTraversal<'_, 'db, Self>,
+        _traversal: &TypeQueryContext<'_, 'db, Self>,
         _ty: Type<'db>,
         _kind: CycleKind,
         (): (),
@@ -32,7 +32,7 @@ impl<'db> TypeOperation<'db> for CanSuppressExceptions {
     fn visit(
         &self,
         db: &'db dyn Db,
-        traversal: &TypeTraversal<'_, 'db, Self>,
+        traversal: &TypeQueryContext<'_, 'db, Self>,
         manager: Type<'db>,
         (): (),
     ) -> bool {
@@ -174,7 +174,7 @@ impl<'db> Type<'db> {
             is_async: bool,
         ) -> bool {
             let env = ProgramEnvironment::from_program(program);
-            TypeTraversal::with_root(&env, CanSuppressExceptions { is_async }, |traversal| {
+            TypeQueryContext::with_root(&env, CanSuppressExceptions { is_async }, |traversal| {
                 traversal.visit(db, manager)
             })
         }

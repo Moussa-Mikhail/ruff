@@ -6,7 +6,7 @@
 //! listing all members in the class's body scope.
 
 use crate::types::recursive::TypeInspector;
-use crate::types::{CycleKind, TypeOperation, TypeTraversal};
+use crate::types::{CycleKind, TypeTraversal, TypeWalk};
 use std::cmp::Ordering;
 
 use itertools::Itertools;
@@ -166,7 +166,7 @@ struct CollectMembers<'db> {
     db: &'db dyn Db,
 }
 
-impl<'db> TypeOperation<'db> for CollectMembers<'db> {
+impl<'db> TypeWalk<'db> for CollectMembers<'db> {
     type Output = Option<FxHashSet<Member<'db>>>;
 
     fn on_cycle(

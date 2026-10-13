@@ -23,7 +23,7 @@ use super::{
     Type, TypeMapping, TypeQualifiers, TypeVarVariance, UnionBuilder, UnionType, VarianceInferable,
     VarianceTerm, definition_expression_annotation, definition_expression_type, visitor,
 };
-use super::{CycleKind, TypeOperation, TypeTraversal};
+use super::{CycleKind, TypeQuery, TypeQueryContext};
 use crate::types::TypeContext;
 use crate::types::TypeDefinition;
 use crate::types::class::FieldKind;
@@ -1950,21 +1950,21 @@ pub(crate) fn extract_unpacked_typed_dict_from_value_type<'db>(
     env: &ProgramEnvironment<'db>,
     ty: Type<'db>,
 ) -> Option<UnpackedTypedDict<'db>> {
-    TypeTraversal::with_root(env, UnpackTypedDict, |root| root.visit(db, ty))
+    TypeQueryContext::with_root(env, UnpackTypedDict, |root| root.visit(db, ty))
         .ok()
         .flatten()
 }
 
 struct UnpackTypedDict;
 
-impl<'db> TypeOperation<'db> for UnpackTypedDict {
+impl<'db> TypeQuery<'db> for UnpackTypedDict {
     // `Ok(None)` adds no union alternatives. `Err(())` means an alternative is not known to be
     // a TypedDict, so the whole union cannot be unpacked as a TypedDict.
     type Output = Result<Option<UnpackedTypedDict<'db>>, ()>;
 
     fn on_cycle(
         &self,
-        _traversal: &TypeTraversal<'_, 'db, Self>,
+        _traversal: &TypeQueryContext<'_, 'db, Self>,
         _ty: Type<'db>,
         kind: CycleKind,
         _state: (),
@@ -1980,7 +1980,7 @@ impl<'db> TypeOperation<'db> for UnpackTypedDict {
     fn visit(
         &self,
         db: &'db dyn Db,
-        traversal: &TypeTraversal<'_, 'db, Self>,
+        traversal: &TypeQueryContext<'_, 'db, Self>,
         ty: Type<'db>,
         _state: (),
     ) -> Self::Output {

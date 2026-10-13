@@ -1,6 +1,6 @@
 use super::variance::{VarianceInferable, VarianceTerm};
 use super::{
-    BoundTypeVarIdentity, CycleKind, IntersectionType, Type, TypeOperation, TypeTraversal,
+    BoundTypeVarIdentity, CycleKind, IntersectionType, Type, TypeQuery, TypeQueryContext,
     UnionType, visitor,
 };
 use crate::Db;
@@ -42,18 +42,19 @@ impl<'db> Type<'db> {
         db: &'db dyn Db,
         env: &ProgramEnvironment<'db>,
     ) -> Type<'db> {
-        TypeTraversal::with_root(env, TypeFormArgument, |root| root.visit(db, self)).unwrap_or(self)
+        TypeQueryContext::with_root(env, TypeFormArgument, |root| root.visit(db, self))
+            .unwrap_or(self)
     }
 }
 
 struct TypeFormArgument;
 
-impl<'db> TypeOperation<'db> for TypeFormArgument {
+impl<'db> TypeQuery<'db> for TypeFormArgument {
     type Output = Option<Type<'db>>;
 
     fn on_cycle(
         &self,
-        _traversal: &TypeTraversal<'_, 'db, Self>,
+        _traversal: &TypeQueryContext<'_, 'db, Self>,
         _ty: Type<'db>,
         _kind: CycleKind,
         _state: (),
@@ -64,7 +65,7 @@ impl<'db> TypeOperation<'db> for TypeFormArgument {
     fn visit(
         &self,
         db: &'db dyn Db,
-        traversal: &TypeTraversal<'_, 'db, Self>,
+        traversal: &TypeQueryContext<'_, 'db, Self>,
         ty: Type<'db>,
         _state: (),
     ) -> Self::Output {
