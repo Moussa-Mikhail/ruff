@@ -1205,6 +1205,8 @@ def keyword_only1(*, x: int) -> int:
 def keyword_only2(*, y: int) -> int:
     return 2
 
+# TODO: This call is incorrectly accepted; it should emit [invalid-argument-type].
+# https://github.com/astral-sh/ty/issues/1778
 # revealed: ((*, x: int) -> bool) | ((*, y: int) -> bool)
 reveal_type(multiple(keyword_only1, keyword_only2))
 ```
