@@ -1,6 +1,8 @@
+use crate::ProgramEnvironment;
+use crate::types::TypeOperations;
 use crate::types::recursive::RecursiveReferenceMapper;
+use crate::types::recursive::TypeInspectionKey;
 use crate::types::recursive::TypeInspector;
-use crate::{ProgramEnvironment, TypeOperations};
 use compact_str::ToCompactString;
 use ruff_db::parsed::parsed_module;
 use ruff_python_ast::name::Name;
@@ -264,11 +266,11 @@ pub(super) fn class_defines_property<'db>(
     class: ClassLiteral<'db>,
     name: &str,
 ) -> bool {
-    let Some(class) = Type::ClassLiteral(class).to_class_type(db) else {
+    let Some(class) = Type::ClassLiteral(class).to_class_type(db, env) else {
         return false;
     };
 
-    for base in class.iter_mro(db) {
+    for base in class.iter_mro(db, env) {
         let ClassBase::Class(base) = base else {
             continue;
         };
@@ -484,9 +486,11 @@ fn known_constructor_preserves_value_type<'db>(
     value: Type<'db>,
     annotation: Type<'db>,
 ) -> bool {
-    TypeInspector::scope(env, |inspector| {
-        known_constructor_preserves_value_type_in(db, inspector, value, annotation)
-    })
+    TypeInspector::scope(
+        env,
+        TypeInspectionKey::KnownConstructorPreservesValueType,
+        |inspector| known_constructor_preserves_value_type_in(db, inspector, value, annotation),
+    )
 }
 
 fn known_constructor_preserves_value_type_in<'db>(
@@ -495,20 +499,11 @@ fn known_constructor_preserves_value_type_in<'db>(
     value: Type<'db>,
     annotation: Type<'db>,
 ) -> bool {
-    let env = inspector.environment();
     inspector.inspect(
         db,
         value,
         |_, _| false,
-        |inspector, value| match value {
-            Type::Union(union) => union.elements(db).iter().all(|element| {
-                known_constructor_preserves_value_type_in(db, inspector, *element, annotation)
-            }),
-            Type::LiteralValue(literal) => literal
-                .fallback_instance(db, env)
-                .is_same_resolved_type(db, annotation),
-            value => value.is_same_resolved_type(db, annotation),
-        },
+        |inspector, value| value.known_constructor_preserves_value_type(db, inspector, annotation),
     )
 }
 
@@ -521,9 +516,11 @@ fn value_has_exact_known_class<'db>(
     value: Type<'db>,
     data_type: KnownClass,
 ) -> bool {
-    TypeInspector::scope(env, |inspector| {
-        value_has_exact_known_class_in(db, inspector, value, data_type)
-    })
+    TypeInspector::scope(
+        env,
+        TypeInspectionKey::ValueHasExactKnownClass,
+        |inspector| value_has_exact_known_class_in(db, inspector, value, data_type),
+    )
 }
 
 fn value_has_exact_known_class_in<'db>(
@@ -532,23 +529,11 @@ fn value_has_exact_known_class_in<'db>(
     value: Type<'db>,
     data_type: KnownClass,
 ) -> bool {
-    let env = inspector.environment();
     inspector.inspect(
         db,
         value,
         |_, _| false,
-        |inspector, value| match value {
-            Type::Union(union) => union
-                .elements(db)
-                .iter()
-                .all(|element| value_has_exact_known_class_in(db, inspector, *element, data_type)),
-            Type::LiteralValue(literal) => match literal.fallback_instance(db, env) {
-                Type::NominalInstance(instance) => instance.has_known_class(db, data_type),
-                _ => false,
-            },
-            Type::NominalInstance(instance) => instance.has_known_class(db, data_type),
-            _ => false,
-        },
+        |inspector, value| value.value_has_exact_known_class(db, inspector, data_type),
     )
 }
 
@@ -1061,7 +1046,9 @@ pub(crate) fn enum_metadata<'db>(
             // ```
             return None;
         }
-        ClassLiteral::DynamicNamedTuple(..) | ClassLiteral::DynamicTypedDict(..) => return None,
+        ClassLiteral::DynamicNamedTuple(..) | ClassLiteral::DynamicTypedDict(..) => {
+            return None;
+        }
         ClassLiteral::DynamicEnum(enum_lit) => {
             let spec = enum_lit.spec(db);
             if !spec.has_known_members(db) {
@@ -1145,11 +1132,11 @@ pub(crate) fn enum_metadata<'db>(
     // through the MRO or falling back to the data-type constructor.
     let user_defined_new = custom_enum_method(db, scope_id, "__new__")
         .or_else(|| inherited_user_defined_enum_new(db, &env, class))
-        .or_else(|| inherited_user_defined_mixin_new(db, class));
+        .or_else(|| inherited_user_defined_mixin_new(db, &env, class));
     let new = resolve_enum_method(user_defined_new, || {
         inherited_known_enum_method(db, &env, class, "__new__")
     });
-    let metaclass_may_transform_values = enum_metaclass_may_transform_values(db, class);
+    let metaclass_may_transform_values = enum_metaclass_may_transform_values(db, &env, class);
     let user_defined_generate_next_value =
         custom_enum_method(db, scope_id, "_generate_next_value_").or_else(|| {
             inherited_user_defined_enum_method(db, &env, class, "_generate_next_value_")
@@ -1233,7 +1220,7 @@ pub(crate) fn enum_metadata<'db>(
                                     } else {
                                         let custom_mixins: SmallVec<[Option<KnownClass>; 1]> =
                                             class
-                                                .iter_mro(db, None)
+                                                .iter_mro(db, &env)
                                                 .skip(1)
                                                 .filter_map(ClassBase::into_class)
                                                 .filter(|class| {
@@ -1390,15 +1377,15 @@ pub(crate) fn enum_metadata<'db>(
 /// enum constructor validates and forwards them to `__new__`/`__init__`.
 fn enum_metaclass_may_transform_values<'db>(
     db: &'db dyn Db,
+    env: &TypeOperations<'db>,
     class: StaticClassLiteral<'db>,
 ) -> bool {
-    let Some(metaclass) = class.metaclass(db).to_class_type(db) else {
+    let Some(metaclass) = class.metaclass(db).class_literal_or_origin(db) else {
         return false;
     };
 
     metaclass
-        .class_literal(db)
-        .iter_mro(db)
+        .iter_mro(db, env)
         .filter_map(ClassBase::into_class)
         .filter_map(|base| base.class_literal(db).as_static())
         .take_while(|base| base.known(db) != Some(KnownClass::EnumType))
@@ -1420,7 +1407,7 @@ fn iter_parent_enum_classes<'db>(
     let env = env.clone();
 
     class
-        .iter_mro(db, None)
+        .iter_mro(db, &env)
         .skip(1)
         .filter_map(ClassBase::into_class)
         .filter_map(move |class_type| {
@@ -1490,12 +1477,12 @@ fn inherited_enum_data_type<'db>(
     let mut selected = InheritedEnumDataType::None;
 
     for explicit_base in class.explicit_bases(db) {
-        let Some(explicit_base) = explicit_base.to_class_type(db) else {
+        let Some(explicit_base) = explicit_base.to_class_type(db, env) else {
             return InheritedEnumDataType::Opaque;
         };
         let mut candidate = None;
 
-        for base in explicit_base.iter_mro(db) {
+        for base in explicit_base.iter_mro(db, env) {
             let Some(base) = base.into_class() else {
                 return InheritedEnumDataType::Opaque;
             };
@@ -1600,10 +1587,11 @@ fn inherited_user_defined_enum_new<'db>(
 /// scalar payload stored by the enum member.
 fn inherited_user_defined_mixin_new<'db>(
     db: &'db dyn Db,
+    env: &TypeOperations<'db>,
     class: StaticClassLiteral<'db>,
 ) -> Option<EnumMethodBinding<'db>> {
     class
-        .iter_mro(db, None)
+        .iter_mro(db, env)
         .skip(1)
         .filter_map(ClassBase::into_class)
         .find_map(|class_type| {
@@ -1619,9 +1607,11 @@ fn inherited_user_defined_mixin_new<'db>(
                 return Some(EnumMethodBinding::Opaque);
             };
             Some(
-                match Type::FunctionLiteral(function)
-                    .apply_optional_owner_specialization_to_member(db, specialization)
-                {
+                match Type::FunctionLiteral(function).apply_optional_owner_specialization_to_member(
+                    db,
+                    env,
+                    specialization,
+                ) {
                     Type::FunctionLiteral(function) => EnumMethodBinding::Function(function),
                     _ => EnumMethodBinding::Opaque,
                 },
@@ -1735,5 +1725,44 @@ pub(crate) fn try_unwrap_nonmember_value<'db>(
             )
         }
         _ => None,
+    }
+}
+
+pub(super) fn known_constructor_preserves_value_type_resolved<'db>(
+    db: &'db dyn Db,
+    inspector: &TypeInspector<'_, 'db>,
+    value: Type<'db>,
+    annotation: Type<'db>,
+) -> bool {
+    let env = inspector.environment();
+    match value {
+        Type::Union(union) => union.elements(db).iter().all(|element| {
+            known_constructor_preserves_value_type_in(db, inspector, *element, annotation)
+        }),
+        Type::LiteralValue(literal) => literal
+            .fallback_instance(db, env)
+            .is_same_resolved_type(db, env, annotation),
+        value => value.is_same_resolved_type(db, env, annotation),
+    }
+}
+
+pub(super) fn value_has_exact_known_class_resolved<'db>(
+    db: &'db dyn Db,
+    inspector: &TypeInspector<'_, 'db>,
+    value: Type<'db>,
+    data_type: KnownClass,
+) -> bool {
+    let env = inspector.environment();
+    match value {
+        Type::Union(union) => union
+            .elements(db)
+            .iter()
+            .all(|element| value_has_exact_known_class_in(db, inspector, *element, data_type)),
+        Type::LiteralValue(literal) => match literal.fallback_instance(db, env) {
+            Type::NominalInstance(instance) => instance.has_known_class(db, data_type),
+            _ => false,
+        },
+        Type::NominalInstance(instance) => instance.has_known_class(db, data_type),
+        _ => false,
     }
 }

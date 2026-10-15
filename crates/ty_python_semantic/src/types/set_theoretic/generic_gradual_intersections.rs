@@ -1,3 +1,5 @@
+use crate::Db;
+use crate::types::TypeOperations;
 use crate::types::generics::specialization_variance;
 use crate::types::tuple::TupleSpec;
 use crate::types::visitor::contains_growing_type;
@@ -5,7 +7,6 @@ use crate::types::{
     ClassBase, ClassType, IntersectionType, KnownClass, MaterializationKind, Type, TypeVarVariance,
     UnionType,
 };
-use crate::{Db, TypeOperations};
 
 pub(super) enum GenericIntersection<'db> {
     /// Replace both intersection elements with this equivalent type.
@@ -94,7 +95,7 @@ fn base_top_intersection<'db>(
 
     let inherited_specialization = subclass_class
         .identity_specialization(db)
-        .iter_mro(db)
+        .iter_mro(db, env)
         .find_map(|ancestor| match ancestor {
             ClassBase::Class(ClassType::Generic(alias)) if alias.origin(db) == base_class => {
                 Some(alias.specialization(db))
@@ -187,7 +188,7 @@ fn base_top_intersection<'db>(
     let specialized = Type::instance(
         db,
         env,
-        subclass_class.apply_optional_specialization(db, Some(specialization)),
+        subclass_class.apply_optional_specialization(db, env, Some(specialization)),
     );
     Some(GenericIntersection::Simplified(
         if subclass_specialization.materialization_kind(db) == Some(MaterializationKind::Top) {
@@ -345,6 +346,6 @@ fn dynamic_generalization_intersection<'db>(
     Some(Type::instance(
         db,
         env,
-        general_class.apply_optional_specialization(db, Some(specialization)),
+        general_class.apply_optional_specialization(db, env, Some(specialization)),
     ))
 }

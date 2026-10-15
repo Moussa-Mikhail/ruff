@@ -1,5 +1,5 @@
 use crate::Db;
-use crate::TypeOperations;
+use crate::types::TypeOperations;
 use rustc_hash::FxHashSet;
 
 use ruff_python_ast::{self as ast};
