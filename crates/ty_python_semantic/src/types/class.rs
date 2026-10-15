@@ -2573,12 +2573,22 @@ impl<'db> ClassType<'db> {
             .state()
             .class_constructors
             .get_or_init(|| Box::new(CycleDetector::new(())))
-            .visit_active(db, env, (Type::from(self), receiver), |cycle| match cycle {
-                Some(kind) => {
-                    CallableTypes::one(CallableType::constructor_cycle(db, receiver, kind))
-                }
-                None => self.compute_constructor_callables(db, env, receiver),
-            })
+            .visit_active(
+                db,
+                env,
+                (
+                    Type::from(self).callable_projection_key(db),
+                    receiver.callable_projection_key(db),
+                ),
+                |cycle| match cycle {
+                    Some(kind) => {
+                        CallableTypes::one(CallableType::constructor_cycle(db, receiver, kind))
+                    }
+                    None => self
+                        .compute_constructor_callables(db, env, receiver)
+                        .map(|callable| callable.projected_from(db, receiver)),
+                },
+            )
     }
 
     fn compute_constructor_callables(
