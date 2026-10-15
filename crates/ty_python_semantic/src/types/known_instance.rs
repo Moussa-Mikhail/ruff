@@ -1,5 +1,5 @@
-use crate::ProgramEnvironment;
 use crate::types::recursive::RecursiveReferenceMapper;
+use crate::{ProgramEnvironment, TypeOperations};
 use itertools::Either;
 use ruff_python_ast::name::Name;
 
@@ -101,7 +101,7 @@ impl<'db> MethodWrapper<'db> {
     /// to expose the descriptor's own attributes.
     pub(super) fn wrap(
         db: &'db dyn Db,
-        env: &ProgramEnvironment<'db>,
+        env: &TypeOperations<'db>,
         wrapped: Type<'db>,
         kind: MethodWrapperKind,
     ) -> Type<'db> {
@@ -157,18 +157,14 @@ impl<'db> MethodWrapper<'db> {
         }
     }
 
-    pub(super) fn instance_fallback(
-        self,
-        db: &'db dyn Db,
-        env: &ProgramEnvironment<'db>,
-    ) -> Type<'db> {
+    pub(super) fn instance_fallback(self, db: &'db dyn Db, env: &TypeOperations<'db>) -> Type<'db> {
         self.class(db).to_instance(db, env)
     }
 
     pub(super) fn callables(
         self,
         db: &'db dyn Db,
-        env: &ProgramEnvironment<'db>,
+        env: &TypeOperations<'db>,
     ) -> Option<CallableTypes<'db>> {
         match self.kind(db) {
             MethodWrapperKind::Staticmethod => self.wrapped(db).try_upcast_to_callable(db, env),
@@ -179,7 +175,7 @@ impl<'db> MethodWrapper<'db> {
     fn recursive_type_normalized_impl(
         self,
         db: &'db dyn Db,
-        env: &ProgramEnvironment<'db>,
+        env: &TypeOperations<'db>,
         div: Type<'db>,
         nested: bool,
     ) -> Option<Self> {
@@ -377,7 +373,7 @@ impl<'db> VarianceInferable<'db> for KnownInstanceType<'db> {
     fn variance_of(
         self,
         db: &'db dyn Db,
-        env: &ProgramEnvironment<'db>,
+        env: &TypeOperations<'db>,
         typevar: BoundTypeVarIdentity<'db>,
     ) -> VarianceTerm<'db> {
         match self {
@@ -457,7 +453,7 @@ impl<'db> KnownInstanceType<'db> {
     pub(super) fn recursive_type_normalized_impl(
         self,
         db: &'db dyn Db,
-        env: &ProgramEnvironment<'db>,
+        env: &TypeOperations<'db>,
         div: Type<'db>,
         nested: bool,
     ) -> Option<Self> {
@@ -563,7 +559,7 @@ impl<'db> KnownInstanceType<'db> {
         }
     }
 
-    pub(super) fn to_meta_type(self, db: &'db dyn Db, env: &ProgramEnvironment<'db>) -> Type<'db> {
+    pub(super) fn to_meta_type(self, db: &'db dyn Db, env: &TypeOperations<'db>) -> Type<'db> {
         self.class(db).to_class_literal(db, env)
     }
 
@@ -572,11 +568,7 @@ impl<'db> KnownInstanceType<'db> {
     /// For example, an alias created using the `type` statement is an instance of
     /// `typing.TypeAliasType`, so `KnownInstanceType::TypeAliasType(_).instance_fallback(db, python_version)`
     /// returns `Type::NominalInstance(NominalInstanceType { class: <typing.TypeAliasType> })`.
-    pub(super) fn instance_fallback(
-        self,
-        db: &'db dyn Db,
-        env: &ProgramEnvironment<'db>,
-    ) -> Type<'db> {
+    pub(super) fn instance_fallback(self, db: &'db dyn Db, env: &TypeOperations<'db>) -> Type<'db> {
         if let Self::MethodWrapper(wrapper) = self {
             wrapper.instance_fallback(db, env)
         } else {
@@ -591,7 +583,7 @@ impl<'db> KnownInstanceType<'db> {
     pub(crate) fn type_form_argument(
         self,
         db: &'db dyn Db,
-        env: &ProgramEnvironment<'db>,
+        env: &TypeOperations<'db>,
     ) -> Option<Type<'db>> {
         match self {
             Self::TypeAliasType(alias) => Some(Type::TypeAlias(alias)),
@@ -629,8 +621,8 @@ impl<'db> KnownInstanceType<'db> {
     pub(super) fn is_instance_of(
         self,
         db: &'db dyn Db,
-        env: &ProgramEnvironment<'db>,
-        class: ClassType,
+        env: &TypeOperations<'db>,
+        class: ClassType<'db>,
     ) -> bool {
         self.class(db).is_subclass_of(db, env, class)
     }
@@ -639,7 +631,7 @@ impl<'db> KnownInstanceType<'db> {
     pub(super) fn repr<'env>(
         self,
         db: &'db dyn Db,
-        env: &'env ProgramEnvironment<'db>,
+        env: &'env TypeOperations<'db>,
     ) -> impl std::fmt::Display + 'env {
         self.display_with(db, env, DisplaySettings::default())
     }
@@ -844,7 +836,7 @@ impl<'db> FieldInstance<'db> {
     fn recursive_type_normalized_impl(
         self,
         db: &'db dyn Db,
-        env: &ProgramEnvironment<'db>,
+        env: &TypeOperations<'db>,
         div: Type<'db>,
         nested: bool,
     ) -> Option<Self> {
@@ -935,7 +927,7 @@ impl<'db> UnionTypeInstance<'db> {
         typevar_binding_context: Option<Definition<'db>>,
         inference_flags: InferenceFlags,
     ) -> Type<'db> {
-        let env = ProgramEnvironment::from_scope(scope_id);
+        let env = TypeOperations::new_root(db, ProgramEnvironment::from_scope(scope_id));
         let mut builder = UnionBuilder::new(db, &env);
         for ty in &value_expr_types {
             match ty.in_type_expression(db, scope_id, typevar_binding_context, inference_flags) {
@@ -998,7 +990,7 @@ impl<'db> UnionTypeInstance<'db> {
     pub(crate) fn value_expression_types(
         self,
         db: &'db dyn Db,
-        env: &ProgramEnvironment<'db>,
+        env: &TypeOperations<'db>,
     ) -> Result<impl Iterator<Item = Type<'db>> + 'db, InvalidTypeExpressionError<'db>> {
         let env = env.clone();
         let to_class_literal = move |ty: Type<'db>| {
@@ -1029,7 +1021,7 @@ impl<'db> UnionTypeInstance<'db> {
     fn recursive_type_normalized_impl(
         self,
         db: &'db dyn Db,
-        env: &ProgramEnvironment<'db>,
+        env: &TypeOperations<'db>,
         div: Type<'db>,
         nested: bool,
     ) -> Option<Self> {
@@ -1079,7 +1071,7 @@ impl<'db> FunctoolsPartialInstance<'db> {
     fn recursive_type_normalized_impl(
         self,
         db: &'db dyn Db,
-        env: &ProgramEnvironment<'db>,
+        env: &TypeOperations<'db>,
         div: Type<'db>,
         nested: bool,
     ) -> Option<Self> {
@@ -1153,7 +1145,7 @@ impl<'db> InternedType<'db> {
     fn recursive_type_normalized_impl(
         self,
         db: &'db dyn Db,
-        env: &ProgramEnvironment<'db>,
+        env: &TypeOperations<'db>,
         div: Type<'db>,
         nested: bool,
     ) -> Option<Self> {
